@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install packaging tomlkit requests
+
+      - name: Generate fresh schedule.json
+        env:
+          PYTHONPATH: src
+        run: |
+          python -c "from pyhc_actions.phep3.pypi_fetcher import update_schedule_file; update_schedule_file('schedule.json')"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            schedule.json
+          body: |
+            ## PyHC Actions ${{ github.ref_name }}
+
+            ### Usage
+
+            **PHEP 3 Compliance Checker:**
+            ```yaml
+            - uses: heliophysicsPy/pyhc-actions/phep3-compliance@${{ github.ref_name }}
+            ```
+
+            **PyHC Environment Compatibility Checker:**
+            ```yaml
+            - uses: heliophysicsPy/pyhc-actions/pyhc-env-compat@${{ github.ref_name }}
+            ```
+
+            ### Included Files
+            - `schedule.json` - Current release schedule for Python and core Scientific Python packages

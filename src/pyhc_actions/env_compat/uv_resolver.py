@@ -1,0 +1,336 @@
+"""UV-based dependency conflict detection."""
+
+from __future__ import annotations
+
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+
+from pyhc_actions.common.reporter import Reporter
+from pyhc_actions.env_compat.fetcher import load_pyhc_requirements, get_package_from_pyproject
+
+
+@dataclass
+class Conflict:
+    """Represents a dependency conflict."""
+
+    package: str
+    your_requirement: str
+    pyhc_requirement: str
+    reason: str
+
+
+def find_uv() -> str | None:
+    """Find the uv executable.
+
+    Returns:
+        Path to uv executable or None if not found
+    """
+    # Check if uv is in PATH
+    uv_path = shutil.which("uv")
+    if uv_path:
+        return uv_path
+
+    # Check common installation locations
+    home = Path.home()
+    candidates = [
+        home / ".cargo" / "bin" / "uv",
+        home / ".local" / "bin" / "uv",
+        Path("/usr/local/bin/uv"),
+    ]
+
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+
+    return None
+
+
+def check_compatibility(
+    pyproject_path: Path | str,
+    pyhc_requirements_source: str | Path | None = None,
+    reporter: Reporter | None = None,
+) -> tuple[bool, list[Conflict]]:
+    """Check if package is compatible with PyHC Environment using uv.
+
+    Args:
+        pyproject_path: Path to pyproject.toml
+        pyhc_requirements_source: URL or path to PyHC requirements
+        reporter: Optional reporter for output
+
+    Returns:
+        Tuple of (is_compatible, list of conflicts)
+    """
+    pyproject_path = Path(pyproject_path)
+    reporter = reporter or Reporter(title="PyHC Compatibility Check")
+
+    # Find uv
+    uv_path = find_uv()
+    if not uv_path:
+        reporter.add_error(
+            package="uv",
+            message="uv not found",
+            details="Install uv: curl -LsSf https://astral.sh/uv/install.sh | sh",
+        )
+        return False, []
+
+    # Load PyHC requirements
+    try:
+        pyhc_requirements = load_pyhc_requirements(pyhc_requirements_source)
+    except Exception as e:
+        reporter.add_error(
+            package="pyhc-requirements",
+            message=f"Failed to load PyHC requirements: {e}",
+        )
+        return False, []
+
+    # Get package path for local install
+    package_path = get_package_from_pyproject(pyproject_path)
+
+    # Create temporary requirements file combining both
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".txt", delete=False
+    ) as f:
+        # Write PyHC requirements
+        for req in pyhc_requirements:
+            f.write(f"{req}\n")
+
+        # Add the package being checked
+        f.write(f"{package_path}\n")
+
+        temp_requirements = f.name
+
+    try:
+        # Run uv pip compile to check if resolution is possible
+        result = subprocess.run(
+            [
+                uv_path,
+                "pip",
+                "compile",
+                temp_requirements,
+                "--quiet",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=pyproject_path.parent if pyproject_path.exists() else None,
+            env={**os.environ, "UV_NO_CACHE": "1"},
+        )
+
+        if result.returncode == 0:
+            return True, []
+
+        # Check if error is platform-specific (not a real conflict)
+        if _is_platform_specific_error(result.stderr):
+            reporter.add_warning(
+                package="platform",
+                message="Platform-specific packages in PyHC Environment",
+                details="Some packages (e.g., nvidia-nccl-cu12) are Linux-only.\n"
+                "This check may fail locally on macOS/Windows but will pass on GitHub Actions.",
+            )
+            return True, []  # Not a real conflict
+
+        # Parse conflicts from error output
+        conflicts = parse_uv_error(result.stderr)
+
+        for conflict in conflicts:
+            reporter.add_error(
+                package=conflict.package,
+                message="Dependency conflict with PyHC Environment",
+                details=f"Your package: {conflict.your_requirement}\n"
+                f"PyHC Environment: {conflict.pyhc_requirement}\n"
+                f"{conflict.reason}",
+            )
+
+        return False, conflicts
+
+    finally:
+        # Clean up temp file
+        Path(temp_requirements).unlink(missing_ok=True)
+
+
+def _is_platform_specific_error(stderr: str) -> bool:
+    """Check if the error is due to platform-specific packages.
+
+    These are not real conflicts - they occur when packages like
+    nvidia-nccl-cu12 are only available for Linux.
+    """
+    platform_indicators = [
+        "no wheels with a matching platform tag",
+        "no matching distribution",
+        "manylinux",
+        "macosx",
+        "win_amd64",
+        "nvidia-nccl",
+        "nvidia-cuda",
+    ]
+    stderr_lower = stderr.lower()
+    return any(indicator in stderr_lower for indicator in platform_indicators)
+
+
+def parse_uv_error(stderr: str) -> list[Conflict]:
+    """Parse uv error output to extract conflict information.
+
+    uv outputs messages like:
+    "Because project requires numpy<2.0 and pyhc-environment requires numpy>=2.0,
+     we can conclude that project and pyhc-environment are incompatible."
+
+    Or:
+    "error: No solution found when resolving dependencies:
+      x numpy>=2.0.0
+      Because you require numpy>=2.0.0 and numpy>=2.0.0 depends on numpy[...], ..."
+
+    Args:
+        stderr: Standard error output from uv
+
+    Returns:
+        List of Conflict objects
+    """
+    conflicts = []
+
+    # Pattern 1: "requires X and Y requires Z" style
+    pattern1 = re.compile(
+        r"Because\s+(\S+)\s+requires\s+(\S+)\s+and\s+(\S+)\s+requires\s+(\S+)",
+        re.IGNORECASE,
+    )
+
+    # Pattern 2: "version solving failed" with requirement lists
+    pattern2 = re.compile(
+        r"The following packages are incompatible:\s*\n(.*?)(?:\n\n|\Z)",
+        re.DOTALL,
+    )
+
+    # Pattern 3: Generic conflict pattern
+    pattern3 = re.compile(
+        r"(\S+)\s+requires\s+(\S+[<>=!]+\S+).*?conflicts?\s+with\s+(\S+[<>=!]+\S+)",
+        re.IGNORECASE,
+    )
+
+    # Try pattern 1
+    for match in pattern1.finditer(stderr):
+        pkg1_name, req1, pkg2_name, req2 = match.groups()
+
+        # Extract package name from requirement
+        pkg_name = re.match(r"([a-zA-Z0-9_-]+)", req1)
+        if pkg_name:
+            conflicts.append(
+                Conflict(
+                    package=pkg_name.group(1),
+                    your_requirement=req1,
+                    pyhc_requirement=req2,
+                    reason=f"{pkg1_name} and {pkg2_name} have incompatible requirements",
+                )
+            )
+
+    # If no conflicts found, try to extract from general error message
+    if not conflicts:
+        # Look for version requirements in the error
+        req_pattern = re.compile(r"([a-zA-Z0-9_-]+)([<>=!]+[0-9.]+(?:,[<>=!]+[0-9.]+)*)")
+
+        requirements_found = {}
+        for match in req_pattern.finditer(stderr):
+            pkg_name, version_spec = match.groups()
+            if pkg_name not in requirements_found:
+                requirements_found[pkg_name] = []
+            requirements_found[pkg_name].append(version_spec)
+
+        # Check for packages with multiple conflicting requirements
+        for pkg_name, specs in requirements_found.items():
+            if len(specs) >= 2:
+                conflicts.append(
+                    Conflict(
+                        package=pkg_name,
+                        your_requirement=specs[0] if specs else "unknown",
+                        pyhc_requirement=specs[1] if len(specs) > 1 else "unknown",
+                        reason="No overlapping version range",
+                    )
+                )
+
+    # If still no conflicts, create a generic one from the error message
+    if not conflicts and "No solution found" in stderr:
+        conflicts.append(
+            Conflict(
+                package="dependencies",
+                your_requirement="see error output",
+                pyhc_requirement="PyHC Environment",
+                reason=_extract_error_summary(stderr),
+            )
+        )
+
+    return conflicts
+
+
+def _extract_error_summary(stderr: str) -> str:
+    """Extract a summary from uv error output."""
+    # Get first few lines of error
+    lines = stderr.strip().split("\n")
+    summary_lines = []
+
+    for line in lines[:5]:
+        line = line.strip()
+        if line and not line.startswith("hint:"):
+            summary_lines.append(line)
+
+    return " ".join(summary_lines)[:200]
+
+
+def run_uv_lock_check(
+    pyproject_path: Path | str,
+    pyhc_requirements: list[str],
+    reporter: Reporter | None = None,
+) -> tuple[bool, str]:
+    """Alternative check using uv lock with a temporary project.
+
+    Creates a temporary pyproject.toml that depends on both the package
+    and all PyHC packages, then runs uv lock.
+
+    Args:
+        pyproject_path: Path to the package's pyproject.toml
+        pyhc_requirements: List of PyHC requirements
+        reporter: Optional reporter
+
+    Returns:
+        Tuple of (success, error_message)
+    """
+    uv_path = find_uv()
+    if not uv_path:
+        return False, "uv not found"
+
+    pyproject_path = Path(pyproject_path)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+
+        # Create temporary pyproject.toml
+        temp_pyproject = {
+            "project": {
+                "name": "pyhc-compat-check",
+                "version": "0.0.0",
+                "requires-python": ">=3.11",
+                "dependencies": [
+                    str(pyproject_path.parent.resolve()),  # The package being checked
+                    *pyhc_requirements,  # All PyHC packages
+                ],
+            }
+        }
+
+        import tomlkit
+        pyproject_file = tmpdir / "pyproject.toml"
+        with open(pyproject_file, "w") as f:
+            tomlkit.dump(temp_pyproject, f)
+
+        # Run uv lock
+        result = subprocess.run(
+            [uv_path, "lock"],
+            capture_output=True,
+            text=True,
+            cwd=tmpdir,
+        )
+
+        if result.returncode == 0:
+            return True, ""
+
+        return False, result.stderr

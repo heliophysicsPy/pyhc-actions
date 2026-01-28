@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pyhc-actions"
+version = "0.1.0"
+description = "GitHub Actions for PyHC package compliance checking"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "PyHC Community", email = "pyhc@lasp.colorado.edu" }
+]
+dependencies = [
+    "packaging>=24.0",
+    "tomlkit>=0.13.0",
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+]
+
+[project.scripts]
+phep3-check = "pyhc_actions.phep3.main:main"
+pyhc-env-compat-check = "pyhc_actions.env_compat.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pyhc_actions"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

@@ -1,0 +1,95 @@
+# action.yml
+name: "PHEP 3 Compliance Checker"
+description: "Check package compliance with PHEP 3 (Python/package version support policy)"
+author: PyHC Community
+
+branding:
+  icon: "check-square"
+  color: "blue"
+
+inputs:
+  project-file:
+    description: "Path to pyproject.toml file"
+    required: false
+    default: "pyproject.toml"
+  fail-on-warning:
+    description: "Treat warnings as errors"
+    required: false
+    default: "false"
+  check-adoption:
+    description: "Check 6-month adoption rule for new versions"
+    required: false
+    default: "true"
+  schedule-path:
+    description: "Path to schedule.json file (optional, will download if missing)"
+    required: false
+    default: ""
+
+outputs:
+  passed:
+    description: "Whether the check passed"
+    value: ${{ steps.check.outputs.passed }}
+  errors:
+    description: "Number of errors found"
+    value: ${{ steps.check.outputs.errors }}
+  warnings:
+    description: "Number of warnings found"
+    value: ${{ steps.check.outputs.warnings }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        pip install packaging tomlkit requests
+
+    - name: Download schedule.json
+      if: ${{ inputs.schedule-path == '' }}
+      shell: bash
+      run: |
+        # Try to download from PyHC releases, fall back to generating
+        SCHEDULE_URL="https://github.com/heliophysicsPy/pyhc-actions/releases/latest/download/schedule.json"
+        if curl -fsSL "$SCHEDULE_URL" -o "${{ github.action_path }}/../schedule.json" 2>/dev/null; then
+          echo "Downloaded schedule.json from releases"
+        else
+          echo "Could not download schedule.json, will use built-in Python schedule"
+        fi
+
+    - name: Run PHEP 3 compliance check
+      id: check
+      shell: bash
+      env:
+        PYTHONPATH: ${{ github.action_path }}/../src
+      run: |
+        SCHEDULE_ARG=""
+        if [ -n "${{ inputs.schedule-path }}" ]; then
+          SCHEDULE_ARG="--schedule ${{ inputs.schedule-path }}"
+        elif [ -f "${{ github.action_path }}/../schedule.json" ]; then
+          SCHEDULE_ARG="--schedule ${{ github.action_path }}/../schedule.json"
+        fi
+
+        EXTRA_ARGS=""
+        if [ "${{ inputs.fail-on-warning }}" = "true" ]; then
+          EXTRA_ARGS="$EXTRA_ARGS --fail-on-warning"
+        fi
+        if [ "${{ inputs.check-adoption }}" = "false" ]; then
+          EXTRA_ARGS="$EXTRA_ARGS --no-adoption-check"
+        fi
+
+        python -m pyhc_actions.phep3.main $SCHEDULE_ARG $EXTRA_ARGS "${{ inputs.project-file }}"
+        EXIT_CODE=$?
+
+        if [ $EXIT_CODE -eq 0 ]; then
+          echo "passed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "passed=false" >> "$GITHUB_OUTPUT"
+        fi
+
+        exit $EXIT_CODE
