@@ -118,8 +118,7 @@ def _check_python_version(
                 reporter.add_warning(
                     package="python",
                     message=f"Python {version_str} support can be dropped per PHEP 3",
-                    details=f"Python {version_str} is older than the minimum required version",
-                    suggestion=f"Consider updating to >={recommended}",
+                    details=f"Python {version_str} is older than the minimum required version ({recommended})",
                 )
         return
 
@@ -129,11 +128,14 @@ def _check_python_version(
         months = version_info.months_since_release(now)
         recommended = schedule.get_minimum_python_version(now)
 
+        details = f"Python {version_str} released {months} months ago (>{PYTHON_SUPPORT_MONTHS} months)"
+        if recommended:
+            details += f". The minimum required version is {recommended}"
+
         reporter.add_warning(
             package="python",
             message=f"Python {version_str} support can be dropped per PHEP 3",
-            details=f"Python {version_str} released {months} months ago (>{PYTHON_SUPPORT_MONTHS} months)",
-            suggestion=f"Consider updating to >={recommended}" if recommended else None,
+            details=details,
         )
 
 
@@ -225,8 +227,7 @@ def _check_lower_bound(
                 reporter.add_warning(
                     package=dep.name,
                     message=f"{dep.name} {version_str} support can be dropped per PHEP 3",
-                    details=f"Version {version_str} is older than the minimum required version",
-                    suggestion=f"Consider updating to {dep.name}>={min_supported}",
+                    details=f"Version {version_str} is older than the minimum required version ({dep.name}>={min_supported})",
                 )
         return
 
@@ -236,11 +237,14 @@ def _check_lower_bound(
         months = version_info.months_since_release(now)
         min_supported = schedule.get_minimum_package_version(pkg_name, now)
 
+        details = f"Version {version_str} released {months} months ago (>{PACKAGE_SUPPORT_MONTHS} months)"
+        if min_supported:
+            details += f". The minimum required version is {dep.name}>={min_supported}"
+
         reporter.add_warning(
             package=dep.name,
             message=f"{dep.name} {version_str} support can be dropped per PHEP 3",
-            details=f"Version {version_str} released {months} months ago (>{PACKAGE_SUPPORT_MONTHS} months)",
-            suggestion=f"Consider updating to {dep.name}>={min_supported}" if min_supported else None,
+            details=details,
         )
 
 
