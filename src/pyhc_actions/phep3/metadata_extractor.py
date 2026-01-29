@@ -45,13 +45,13 @@ def get_min_phep3_python(schedule: "Schedule") -> str:
         schedule: Schedule with Python version info
 
     Returns:
-        Python version string (e.g., "3.10") or "3.10" as fallback
+        Python version string (e.g., "3.12") or "3.12" as fallback
     """
     from datetime import datetime, timezone
 
     now = datetime.now(timezone.utc)
     min_version = schedule.get_minimum_python_version(now)
-    return min_version or "3.10"
+    return min_version or "3.12"
 
 
 def extract_metadata_with_uv(
@@ -77,7 +77,7 @@ def extract_metadata_with_uv(
     if not check_uv_available():
         return None
 
-    python_version = python_version or "3.10"
+    python_version = python_version or "3.12"
 
     with tempfile.TemporaryDirectory() as tmpdir:
         venv_path = Path(tmpdir) / ".venv"

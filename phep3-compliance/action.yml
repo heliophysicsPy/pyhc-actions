@@ -91,13 +91,13 @@ try:
         supported.sort(key=lambda v: [int(x) for x in v.split('.')])
         print(supported[0])
     else:
-        print('3.10')  # Fallback
+        print('3.12')  # Fallback
 except Exception as e:
-    print('3.10', file=sys.stderr)
-    print('3.10')
-" 2>/dev/null || echo "3.10")
+    print('3.12', file=sys.stderr)
+    print('3.12')
+" 2>/dev/null || echo "3.12")
         else
-          MIN_PYTHON="3.10"
+          MIN_PYTHON="3.12"
         fi
 
         echo "Using Python $MIN_PYTHON (minimum PHEP 3 supported version)"
