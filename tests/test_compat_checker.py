@@ -8,9 +8,11 @@ from pyhc_actions.env_compat.uv_resolver import (
     find_uv,
     Conflict,
     _is_python_version_error,
+    check_python_compatibility,
 )
 from pyhc_actions.env_compat.fetcher import (
     parse_requirements_for_uv,
+    parse_python_version_from_env_yml,
 )
 
 
@@ -173,3 +175,152 @@ we can conclude that project and pyhc-environment are incompatible.
         is_error, required = _is_python_version_error("")
         assert is_error is False
         assert required is None
+
+
+class TestParsePythonVersionFromEnvYml:
+    """Tests for parsing Python version from environment.yml."""
+
+    def test_simple_python_version(self):
+        """Test parsing simple Python version."""
+        yaml_content = """
+name: pyhc-environment
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12.9
+  - numpy
+  - scipy
+"""
+        result = parse_python_version_from_env_yml(yaml_content)
+        assert result == "3.12.9"
+
+    def test_python_with_channel_and_build(self):
+        """Test parsing Python with channel prefix and build string."""
+        yaml_content = """
+name: pyhc-environment
+channels:
+  - conda-forge
+dependencies:
+  - conda-forge::python=3.12.9=h9e4cc4f_0_cpython
+  - numpy
+"""
+        result = parse_python_version_from_env_yml(yaml_content)
+        assert result == "3.12.9"
+
+    def test_python_minor_version_only(self):
+        """Test parsing Python with minor version only (no patch)."""
+        yaml_content = """
+name: pyhc
+dependencies:
+  - python=3.12
+  - pip
+"""
+        result = parse_python_version_from_env_yml(yaml_content)
+        assert result == "3.12"
+
+    def test_python_with_specifier(self):
+        """Test parsing Python with version specifier."""
+        yaml_content = """
+dependencies:
+  - python>=3.11
+"""
+        result = parse_python_version_from_env_yml(yaml_content)
+        assert result == "3.11"
+
+    def test_no_python_in_dependencies(self):
+        """Test when Python is not in dependencies."""
+        yaml_content = """
+dependencies:
+  - numpy
+  - scipy
+"""
+        result = parse_python_version_from_env_yml(yaml_content)
+        assert result is None
+
+    def test_empty_yaml(self):
+        """Test empty YAML content."""
+        result = parse_python_version_from_env_yml("")
+        assert result is None
+
+    def test_invalid_yaml(self):
+        """Test invalid YAML content."""
+        yaml_content = "{{invalid yaml content}}"
+        result = parse_python_version_from_env_yml(yaml_content)
+        assert result is None
+
+    def test_no_dependencies_key(self):
+        """Test YAML without dependencies key."""
+        yaml_content = """
+name: some-env
+channels:
+  - conda-forge
+"""
+        result = parse_python_version_from_env_yml(yaml_content)
+        assert result is None
+
+
+class TestCheckPythonCompatibility:
+    """Tests for checking Python version compatibility."""
+
+    def test_compatible_version(self):
+        """Test when package is compatible with PyHC Python."""
+        is_compat, error = check_python_compatibility(">=3.11", "3.12.9")
+        assert is_compat is True
+        assert error is None
+
+    def test_compatible_range(self):
+        """Test when PyHC Python is within package's range."""
+        is_compat, error = check_python_compatibility(">=3.11,<3.14", "3.12.9")
+        assert is_compat is True
+        assert error is None
+
+    def test_incompatible_too_new(self):
+        """Test when package requires newer Python than PyHC."""
+        is_compat, error = check_python_compatibility(">=3.13", "3.12.9")
+        assert is_compat is False
+        assert error is not None
+        assert "Python >=3.13" in error
+        assert "Python 3.12.9" in error
+
+    def test_incompatible_too_old(self):
+        """Test when package excludes PyHC's Python version."""
+        is_compat, error = check_python_compatibility("<3.12", "3.12.9")
+        assert is_compat is False
+        assert error is not None
+        assert "Python <3.12" in error
+
+    def test_no_requires_python(self):
+        """Test when package has no requires-python (skip check)."""
+        is_compat, error = check_python_compatibility(None, "3.12.9")
+        assert is_compat is True
+        assert error is None
+
+    def test_empty_requires_python(self):
+        """Test when requires-python is empty string (skip check)."""
+        is_compat, error = check_python_compatibility("", "3.12.9")
+        assert is_compat is True
+        assert error is None
+
+    def test_invalid_specifier(self):
+        """Test when requires-python is invalid (skip check)."""
+        is_compat, error = check_python_compatibility("not-a-specifier", "3.12.9")
+        assert is_compat is True
+        assert error is None
+
+    def test_invalid_pyhc_version(self):
+        """Test when PyHC Python version is invalid (skip check)."""
+        is_compat, error = check_python_compatibility(">=3.11", "invalid")
+        assert is_compat is True
+        assert error is None
+
+    def test_exact_match(self):
+        """Test when requires-python exactly matches PyHC Python."""
+        is_compat, error = check_python_compatibility("==3.12.9", "3.12.9")
+        assert is_compat is True
+        assert error is None
+
+    def test_minor_version_compatible(self):
+        """Test compatibility with minor version specifier."""
+        is_compat, error = check_python_compatibility(">=3.12", "3.12.9")
+        assert is_compat is True
+        assert error is None

@@ -10,8 +10,16 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from packaging.specifiers import SpecifierSet, InvalidSpecifier
+from packaging.version import Version, InvalidVersion
+
 from pyhc_actions.common.reporter import Reporter
-from pyhc_actions.env_compat.fetcher import load_pyhc_requirements, get_package_from_pyproject
+from pyhc_actions.common.parser import parse_pyproject
+from pyhc_actions.env_compat.fetcher import (
+    load_pyhc_requirements,
+    get_package_from_pyproject,
+    get_pyhc_python_version,
+)
 
 
 @dataclass
@@ -22,6 +30,54 @@ class Conflict:
     your_requirement: str
     pyhc_requirement: str
     reason: str
+
+
+def check_python_compatibility(
+    requires_python: str | None,
+    pyhc_python: str,
+) -> tuple[bool, str | None]:
+    """Check if package's requires-python is compatible with PyHC Environment.
+
+    This is an upfront check to catch Python version incompatibilities before
+    running uv resolution, providing a clearer error message.
+
+    Args:
+        requires_python: The requires-python string from pyproject.toml (e.g., ">=3.11,<3.14")
+        pyhc_python: The Python version used by PyHC Environment (e.g., "3.12.9")
+
+    Returns:
+        Tuple of (is_compatible, error_message or None)
+        If is_compatible is True, error_message is None.
+        If is_compatible is False, error_message explains the incompatibility.
+    """
+    # If no requires-python specified, skip this check
+    # Let uv handle any compatibility issues from wheel/sdist metadata
+    if not requires_python:
+        return True, None
+
+    try:
+        specifier = SpecifierSet(requires_python)
+    except InvalidSpecifier:
+        # If we can't parse the specifier, skip this check and let uv handle it
+        return True, None
+
+    try:
+        pyhc_version = Version(pyhc_python)
+    except InvalidVersion:
+        # If we can't parse the PyHC version, skip this check
+        return True, None
+
+    # Check if PyHC's Python version satisfies the package's requirements
+    if pyhc_version in specifier:
+        return True, None
+
+    # PyHC's Python version is incompatible
+    error_msg = (
+        f"Your package requires: Python {requires_python}\n"
+        f"PyHC Environment uses: Python {pyhc_python}\n"
+        f"Your package cannot be installed in the PyHC Environment."
+    )
+    return False, error_msg
 
 
 def find_uv() -> str | None:
@@ -67,6 +123,35 @@ def check_compatibility(
     """
     pyproject_path = Path(pyproject_path)
     reporter = reporter or Reporter(title="PyHC Compatibility Check")
+
+    # Upfront Python version compatibility check
+    # This catches Python incompatibilities with a clear error message
+    # before running the full uv resolution
+    try:
+        pyproject_data = parse_pyproject(pyproject_path)
+        requires_python = pyproject_data.get("project", {}).get("requires-python")
+    except Exception:
+        requires_python = None
+
+    pyhc_python = get_pyhc_python_version()
+    if pyhc_python and requires_python:
+        is_python_compat, python_error = check_python_compatibility(
+            requires_python, pyhc_python
+        )
+        if not is_python_compat:
+            reporter.add_error(
+                package="python",
+                message="Python version incompatible with PyHC Environment",
+                details=python_error,
+            )
+            return False, [
+                Conflict(
+                    package="python",
+                    your_requirement=f"Python {requires_python}",
+                    pyhc_requirement=f"Python {pyhc_python}",
+                    reason="Python version requirements are incompatible",
+                )
+            ]
 
     # Find uv
     uv_path = find_uv()
@@ -138,9 +223,9 @@ def check_compatibility(
         if is_python_error:
             reporter.add_warning(
                 package="python",
-                message="PyHC Environment requires a newer Python version",
+                message="Python version mismatch with PyHC Environment",
                 details=f"The PyHC Environment requires {required_version}.\n"
-                "This check cannot run on older Python versions.\n"
+                "Your current Python version doesn't satisfy this requirement.\n"
                 "Run with a compatible Python version to verify package compatibility.",
             )
             return True, []  # Not a package conflict
@@ -186,14 +271,19 @@ def _is_platform_specific_error(stderr: str) -> bool:
 def _is_python_version_error(stderr: str) -> tuple[bool, str | None]:
     """Check if the error is due to Python version mismatch.
 
-    This occurs when the PyHC Environment requires a newer Python version
-    than the one running the check. This is not a conflict with the package
-    being tested - it's a limitation of the test environment.
+    This occurs when the Python version running the check doesn't satisfy
+    the requirements of packages in the PyHC Environment. This could be:
+    - Running too OLD a Python (package requires >=3.12, you have 3.11)
+    - Running too NEW a Python (package requires <3.14, you have 3.14)
+
+    This is not a conflict with the package being tested - it's a limitation
+    of the test environment.
 
     Returns:
         Tuple of (is_python_error, required_version or None)
     """
     # Look for "current Python version (X.Y.Z) does not satisfy Python>=X.Y"
+    # or "current Python version (X.Y.Z) does not satisfy Python<X.Y"
     match = re.search(
         r"current python version \([\d.]+\) does not satisfy python([<>=!]+[\d.]+)",
         stderr.lower(),

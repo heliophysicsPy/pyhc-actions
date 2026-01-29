@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import requests
+import yaml
 
 if TYPE_CHECKING:
     pass
@@ -15,6 +17,12 @@ if TYPE_CHECKING:
 PYHC_REQUIREMENTS_URL = (
     "https://raw.githubusercontent.com/heliophysicsPy/pyhc-docker-environment/"
     "main/docker/pyhc-environment/contents/requirements.txt"
+)
+
+# Default URL to PyHC Environment environment.yml (conda environment file)
+PYHC_ENVIRONMENT_YML_URL = (
+    "https://raw.githubusercontent.com/heliophysicsPy/pyhc-docker-environment/"
+    "main/docker/pyhc-environment/contents/environment.yml"
 )
 
 
@@ -113,3 +121,87 @@ def get_package_from_pyproject(pyproject_path: Path | str) -> str:
         return str(pyproject_path.parent.resolve())
 
     return "."
+
+
+def fetch_pyhc_environment_yml(url: str | None = None) -> str:
+    """Fetch PyHC Environment environment.yml content.
+
+    Args:
+        url: URL to fetch from (default: official GitHub raw URL)
+
+    Returns:
+        Contents of environment.yml as string
+
+    Raises:
+        requests.RequestException: If fetch fails
+    """
+    url = url or PYHC_ENVIRONMENT_YML_URL
+
+    response = requests.get(url, timeout=30)
+    response.raise_for_status()
+
+    return response.text
+
+
+def parse_python_version_from_env_yml(yaml_content: str) -> str | None:
+    """Parse Python version from environment.yml content.
+
+    The Python line in environment.yml can have various formats:
+    - conda-forge::python=3.12.9=h9e4cc4f_0_cpython  (with channel and build string)
+    - python=3.12.12                                   (simple)
+    - python>=3.12                                     (version specifier)
+
+    Args:
+        yaml_content: Raw YAML content of environment.yml
+
+    Returns:
+        Python version string (e.g., "3.12.9" or "3.12") or None if not found
+    """
+    try:
+        data = yaml.safe_load(yaml_content)
+    except yaml.YAMLError:
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    dependencies = data.get("dependencies", [])
+    if not isinstance(dependencies, list):
+        return None
+
+    # Regex to extract version from various formats
+    # Matches: python=3.12.9, python=3.12, python>=3.12, python==3.12.9
+    # Also handles channel prefix: conda-forge::python=3.12.9=build_string
+    python_version_re = re.compile(
+        r"(?:.*::)?python[<>=!]*=?(\d+\.\d+(?:\.\d+)?)"
+    )
+
+    for dep in dependencies:
+        if not isinstance(dep, str):
+            continue
+
+        if dep.startswith("python") or "::python" in dep:
+            match = python_version_re.match(dep)
+            if match:
+                return match.group(1)
+
+    return None
+
+
+def get_pyhc_python_version(url: str | None = None) -> str | None:
+    """Fetch and parse the Python version from PyHC Environment.
+
+    Convenience function that fetches environment.yml and extracts
+    the Python version in one call.
+
+    Args:
+        url: URL to environment.yml (default: official GitHub raw URL)
+
+    Returns:
+        Python version string or None if unable to determine
+    """
+    try:
+        yaml_content = fetch_pyhc_environment_yml(url)
+        return parse_python_version_from_env_yml(yaml_content)
+    except requests.RequestException:
+        return None
