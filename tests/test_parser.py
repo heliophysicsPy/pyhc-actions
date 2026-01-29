@@ -8,6 +8,7 @@ from pyhc_actions.common.parser import (
     parse_dependency,
     extract_version_bounds,
     extract_python_version,
+    extract_python_bounds,
     ParsedDependency,
     VersionBounds,
 )
@@ -142,3 +143,121 @@ class TestExtractPythonVersion:
         """Test with invalid specifier."""
         version = extract_python_version("invalid")
         assert version is None
+
+
+class TestTildeEqualsHandling:
+    """Tests for ~= compatible release operator handling."""
+
+    def test_tilde_equals_has_upper_bound(self):
+        """Test that ~=1.26 creates an implicit upper bound of 2.0.0."""
+        spec = SpecifierSet("~=1.26")
+        bounds = extract_version_bounds(spec)
+
+        assert bounds.lower == Version("1.26")
+        assert bounds.lower_inclusive is True
+        assert bounds.has_upper_constraint is True
+        assert bounds.upper == Version("2.0.0")
+        assert bounds.upper_inclusive is False
+
+    def test_tilde_equals_patch_level(self):
+        """Test that ~=1.26.1 creates an implicit upper bound of 1.27.0."""
+        spec = SpecifierSet("~=1.26.1")
+        bounds = extract_version_bounds(spec)
+
+        assert bounds.lower == Version("1.26.1")
+        assert bounds.lower_inclusive is True
+        assert bounds.has_upper_constraint is True
+        assert bounds.upper == Version("1.27.0")
+        assert bounds.upper_inclusive is False
+
+    def test_tilde_equals_three_part_version(self):
+        """Test ~= with three-part version like ~=2.0.0."""
+        spec = SpecifierSet("~=2.0.0")
+        bounds = extract_version_bounds(spec)
+
+        assert bounds.lower == Version("2.0.0")
+        assert bounds.has_upper_constraint is True
+        assert bounds.upper == Version("2.1.0")
+
+
+class TestNotEqualsHandling:
+    """Tests for != exclusion tracking."""
+
+    def test_not_equals_tracked(self):
+        """Test that != exclusions are tracked."""
+        spec = SpecifierSet(">=1.0,!=2.0")
+        bounds = extract_version_bounds(spec)
+
+        assert bounds.lower == Version("1.0")
+        assert len(bounds.exclusions) == 1
+        assert Version("2.0") in bounds.exclusions
+
+    def test_multiple_not_equals(self):
+        """Test multiple != exclusions."""
+        spec = SpecifierSet(">=1.0,!=2.0,!=2.1")
+        bounds = extract_version_bounds(spec)
+
+        assert len(bounds.exclusions) == 2
+        assert Version("2.0") in bounds.exclusions
+        assert Version("2.1") in bounds.exclusions
+
+
+class TestWildcardHandling:
+    """Tests for wildcard version handling like ==1.26.*."""
+
+    def test_wildcard_as_range(self):
+        """Test that ==1.26.* is handled as a bounded range."""
+        spec = SpecifierSet("==1.26.*")
+        bounds = extract_version_bounds(spec)
+
+        assert bounds.is_wildcard is True
+        assert bounds.lower == Version("1.26.0")
+        assert bounds.lower_inclusive is True
+        assert bounds.upper == Version("1.27.0")
+        assert bounds.upper_inclusive is False
+        assert bounds.has_upper_constraint is True
+
+    def test_wildcard_major_only(self):
+        """Test ==1.* wildcard."""
+        spec = SpecifierSet("==1.*")
+        bounds = extract_version_bounds(spec)
+
+        assert bounds.is_wildcard is True
+        assert bounds.lower == Version("1.0")
+        assert bounds.upper == Version("2.0")
+        assert bounds.has_upper_constraint is True
+
+
+class TestExtractPythonBounds:
+    """Tests for extract_python_bounds function."""
+
+    def test_simple_lower_bound(self):
+        """Test simple lower bound extraction."""
+        bounds = extract_python_bounds(">=3.9")
+
+        assert bounds.lower == Version("3.9")
+        assert bounds.upper is None
+        assert bounds.has_upper_constraint is False
+
+    def test_upper_bound_extraction(self):
+        """Test upper bound extraction."""
+        bounds = extract_python_bounds(">=3.9,<3.13")
+
+        assert bounds.lower == Version("3.9")
+        assert bounds.upper == Version("3.13")
+        assert bounds.has_upper_constraint is True
+
+    def test_none_input(self):
+        """Test with None input."""
+        bounds = extract_python_bounds(None)
+
+        assert bounds.lower is None
+        assert bounds.upper is None
+
+    def test_exclusion_tracking(self):
+        """Test that exclusions are tracked in Python version."""
+        bounds = extract_python_bounds(">=3.9,!=3.11")
+
+        assert bounds.lower == Version("3.9")
+        assert len(bounds.exclusions) == 1
+        assert Version("3.11") in bounds.exclusions

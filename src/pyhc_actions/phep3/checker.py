@@ -9,9 +9,12 @@ from packaging.version import Version
 
 from pyhc_actions.common.parser import (
     ParsedDependency,
+    VersionBounds,
     extract_version_bounds,
     extract_python_version,
+    extract_python_bounds,
     get_dependencies_from_pyproject,
+    parse_dependency,
     parse_pyproject,
 )
 from pyhc_actions.common.reporter import Reporter
@@ -31,6 +34,7 @@ def check_compliance(
     reporter: Reporter,
     check_adoption: bool = True,
     now: datetime | None = None,
+    use_uv_fallback: bool = True,
 ) -> bool:
     """Check pyproject.toml compliance with PHEP 3.
 
@@ -40,6 +44,7 @@ def check_compliance(
         reporter: Reporter for output
         check_adoption: Whether to check 6-month adoption rule
         now: Current time (for testing)
+        use_uv_fallback: Whether to use uv for legacy format extraction
 
     Returns:
         True if compliant (no errors), False otherwise
@@ -49,29 +54,72 @@ def check_compliance(
 
     reporter.set_file_path(str(pyproject_path))
 
+    requires_python = None
+    dependencies = []
+    extraction_method = None
+
+    # Try parsing pyproject.toml first
     try:
         pyproject_data = parse_pyproject(pyproject_path)
+        project = pyproject_data.get("project", {})
+
+        if project:
+            # PEP 621 format
+            requires_python = project.get("requires-python")
+            dependencies = get_dependencies_from_pyproject(pyproject_data)
+            extraction_method = "pyproject.toml"
     except FileNotFoundError:
-        reporter.add_error(
-            package="pyproject.toml",
-            message=f"File not found: {pyproject_path}",
-        )
-        return False
+        pyproject_data = None
+        project = {}
     except Exception as e:
-        reporter.add_error(
+        reporter.add_warning(
             package="pyproject.toml",
             message=f"Failed to parse pyproject.toml: {e}",
+            details="Will attempt uv-based extraction if available",
+        )
+        pyproject_data = None
+        project = {}
+
+    # Try uv fallback if needed
+    if extraction_method is None and use_uv_fallback:
+        from pyhc_actions.phep3.metadata_extractor import extract_metadata_from_project
+
+        project_dir = pyproject_path.parent if pyproject_path.suffix == ".toml" else pyproject_path
+        metadata = extract_metadata_from_project(project_dir, schedule)
+
+        if metadata:
+            requires_python = metadata.requires_python
+            dependencies = [
+                parse_dependency(dep)
+                for dep in metadata.dependencies
+                if parse_dependency(dep) is not None
+            ]
+            # Add optional dependencies
+            for group_deps in metadata.optional_dependencies.values():
+                for dep_str in group_deps:
+                    dep = parse_dependency(dep_str)
+                    if dep:
+                        dependencies.append(dep)
+            extraction_method = f"uv (from {metadata.extracted_via})"
+            reporter.add_warning(
+                package="metadata",
+                message=f"Using {extraction_method} for metadata extraction",
+                details="Package uses legacy format (setup.py or Poetry)",
+            )
+
+    # If still no data, report error
+    if extraction_method is None:
+        reporter.add_error(
+            package="pyproject.toml",
+            message=f"Could not extract metadata from {pyproject_path}",
+            details="No PEP 621 [project] section found and uv extraction failed",
         )
         return False
 
-    project = pyproject_data.get("project", {})
-
     # Check Python version requirement
-    requires_python = project.get("requires-python")
     _check_python_version(requires_python, schedule, reporter, now)
 
     # Check dependencies
-    dependencies = get_dependencies_from_pyproject(pyproject_data)
     for dep in dependencies:
         _check_dependency(dep, schedule, reporter, check_adoption, now)
 
@@ -93,7 +141,9 @@ def _check_python_version(
         )
         return
 
-    min_version = extract_python_version(requires_python)
+    bounds = extract_python_bounds(requires_python)
+    min_version = bounds.lower
+
     if not min_version:
         reporter.add_warning(
             package="python",
@@ -104,39 +154,77 @@ def _check_python_version(
     # Get the version string (e.g., "3.9" from Version("3.9.0"))
     version_str = f"{min_version.major}.{min_version.minor}"
 
-    # Check if this Python version is in the schedule
+    # Get the minimum Python version that MUST be supported (cannot be dropped)
+    min_required = schedule.get_minimum_python_version(now)
+
+    if min_required:
+        min_required_ver = Version(min_required)
+        # ERROR if lower bound is higher than minimum required (drops support too early)
+        if min_version > min_required_ver:
+            reporter.add_error(
+                package="python",
+                message=f"requires-python = \"{requires_python}\" drops support for Python {min_required} too early",
+                details=f"Python {min_required} must still be supported per PHEP 3",
+                suggestion=f"Change to requires-python = \">={min_required}\"",
+            )
+
+    # Check if lower bound is an older version that CAN be dropped (informational)
     version_info = schedule.python.get(version_str)
-    if not version_info:
-        # Check if it's an older version not in schedule (likely too old)
-        recommended = schedule.get_minimum_python_version(now)
-        if recommended:
-            # Compare versions
-            rec_parts = [int(p) for p in recommended.split(".")]
-            min_parts = [min_version.major, min_version.minor]
-            if min_parts < rec_parts:
-                # This is a WARNING, not an error - packages CAN drop old versions but don't have to
-                reporter.add_warning(
-                    package="python",
-                    message=f"Python {version_str} support can be dropped per PHEP 3",
-                    details=f"Python {version_str} is older than the minimum required version ({recommended})",
-                )
-        return
-
-    # Check if version can be dropped - this is informational (WARNING), not an error
-    # PHEP 3 says packages CAN drop support after the window, not that they MUST
-    if version_info.is_droppable(now):
+    if version_info and version_info.is_droppable(now):
         months = version_info.months_since_release(now)
-        recommended = schedule.get_minimum_python_version(now)
-
         details = f"Python {version_str} released {months} months ago (>{PYTHON_SUPPORT_MONTHS} months)"
-        if recommended:
-            details += f". The minimum required version is {recommended}"
+        if min_required:
+            details += f". The minimum required version is {min_required}"
 
         reporter.add_warning(
             package="python",
             message=f"Python {version_str} support can be dropped per PHEP 3",
             details=details,
         )
+    elif not version_info and min_required:
+        # Version not in schedule - check if it's older than minimum
+        rec_parts = [int(p) for p in min_required.split(".")]
+        min_parts = [min_version.major, min_version.minor]
+        if min_parts < rec_parts:
+            reporter.add_warning(
+                package="python",
+                message=f"Python {version_str} support can be dropped per PHEP 3",
+                details=f"Python {version_str} is older than the minimum required version ({min_required})",
+            )
+
+    # Check upper bound - ERROR if it excludes a Python version that must_be_supported(now)
+    if bounds.has_upper_constraint and bounds.upper:
+        for py_version, py_info in schedule.python.items():
+            if py_info.must_be_supported(now):
+                py_ver = Version(py_version)
+                # Check if this required version is excluded by the upper bound
+                if bounds.upper_inclusive:
+                    excluded = py_ver > bounds.upper
+                else:
+                    excluded = py_ver >= bounds.upper
+
+                if excluded:
+                    reporter.add_error(
+                        package="python",
+                        message=f"requires-python = \"{requires_python}\" blocks adoption of Python {py_version}",
+                        details=f"Python {py_version} must be supported within 6 months of release per PHEP 3",
+                        suggestion=f"Remove upper bound or update to include Python {py_version}",
+                    )
+
+    # Check exclusions - ERROR if a required version is excluded
+    if bounds.exclusions:
+        for py_version, py_info in schedule.python.items():
+            if py_info.must_be_supported(now):
+                py_ver = Version(py_version)
+                # Check if excluded (need to match major.minor)
+                for excl in bounds.exclusions:
+                    if excl.major == py_ver.major and excl.minor == py_ver.minor:
+                        reporter.add_error(
+                            package="python",
+                            message=f"requires-python = \"{requires_python}\" excludes required Python {py_version}",
+                            details=f"Python {py_version} must be supported per PHEP 3",
+                            suggestion=f"Remove !={excl} from requires-python",
+                        )
 
 
 def _check_dependency(
@@ -166,19 +254,39 @@ def _check_dependency(
     # Check for upper bound / exact constraints (warning)
     if bounds.has_max_constraint:
         if bounds.exact:
-            reporter.add_warning(
-                package=dep.name,
-                message=f"{dep.raw} has exact version constraint",
-                details="Exact constraints should only be used when absolutely necessary",
-                suggestion=f"Remove exact constraint and use >= instead",
-            )
+            if bounds.is_wildcard:
+                reporter.add_warning(
+                    package=dep.name,
+                    message=f"{dep.raw} has wildcard version constraint",
+                    details=f"Wildcard constraints create an implicit upper bound (<{bounds.upper})",
+                    suggestion=f"Consider using >= instead for better compatibility",
+                )
+            else:
+                reporter.add_warning(
+                    package=dep.name,
+                    message=f"{dep.raw} has exact version constraint",
+                    details="Exact constraints should only be used when absolutely necessary",
+                    suggestion=f"Remove exact constraint and use >= instead",
+                )
         elif bounds.upper:
-            reporter.add_warning(
-                package=dep.name,
-                message=f"{dep.raw} has upper bound constraint",
-                details="Upper bounds should only be used when absolutely necessary",
-                suggestion=f"Consider removing <{bounds.upper} unless required",
+            # Check if this is from a ~= constraint
+            has_tilde_equals = any(
+                spec.operator == "~=" for spec in (dep.specifier or [])
             )
+            if has_tilde_equals:
+                reporter.add_warning(
+                    package=dep.name,
+                    message=f"{dep.raw} has implicit upper bound from ~=",
+                    details=f"The ~= operator creates an implicit upper bound (<{bounds.upper})",
+                    suggestion=f"Consider using >= instead for better compatibility",
+                )
+            else:
+                reporter.add_warning(
+                    package=dep.name,
+                    message=f"{dep.raw} has upper bound constraint",
+                    details="Upper bounds should only be used when absolutely necessary",
+                    suggestion=f"Consider removing <{bounds.upper} unless required",
+                )
 
     # Check lower bound
     if bounds.lower:
@@ -208,7 +316,7 @@ def _check_lower_bound(
     reporter: Reporter,
     now: datetime,
 ):
-    """Check if the lower bound is too old."""
+    """Check if the lower bound violates PHEP 3 requirements."""
     pkg_versions = schedule.packages.get(pkg_name, {})
     if not pkg_versions:
         return
@@ -216,27 +324,24 @@ def _check_lower_bound(
     # Get version string (e.g., "1.26" from Version("1.26.0"))
     version_str = f"{lower_bound.major}.{lower_bound.minor}"
 
+    # Get the minimum version that MUST still be supported
+    min_supported = schedule.get_minimum_package_version(pkg_name, now)
+
+    if min_supported:
+        min_ver = Version(min_supported)
+        # ERROR if lower bound is higher than minimum required (drops support too early)
+        if lower_bound > min_ver:
+            reporter.add_error(
+                package=dep.name,
+                message=f"{dep.raw} drops support for {dep.name} {min_supported} too early",
+                details=f"{dep.name} {min_supported} must still be supported per PHEP 3",
+                suggestion=f"Change to {dep.name}>={min_supported}",
+            )
+
+    # Check if the lower bound version itself can be dropped (informational)
     version_info = pkg_versions.get(version_str)
-    if not version_info:
-        # Lower bound might be older than anything in schedule - check
-        min_supported = schedule.get_minimum_package_version(pkg_name, now)
-        if min_supported:
-            min_ver = Version(min_supported)
-            if lower_bound < min_ver:
-                # This is a WARNING - packages CAN drop old versions but don't have to
-                reporter.add_warning(
-                    package=dep.name,
-                    message=f"{dep.name} {version_str} support can be dropped per PHEP 3",
-                    details=f"Version {version_str} is older than the minimum required version ({dep.name}>={min_supported})",
-                )
-        return
-
-    # Check if this version can be dropped - this is informational (WARNING), not an error
-    # PHEP 3 says packages CAN drop support after the window, not that they MUST
-    if version_info.is_droppable(now):
+    if version_info and version_info.is_droppable(now):
         months = version_info.months_since_release(now)
-        min_supported = schedule.get_minimum_package_version(pkg_name, now)
-
         details = f"Version {version_str} released {months} months ago (>{PACKAGE_SUPPORT_MONTHS} months)"
         if min_supported:
             details += f". The minimum required version is {dep.name}>={min_supported}"
@@ -246,6 +351,15 @@ def _check_lower_bound(
             message=f"{dep.name} {version_str} support can be dropped per PHEP 3",
             details=details,
         )
+    elif not version_info and min_supported:
+        # Version not in schedule - check if it's older than minimum
+        min_ver = Version(min_supported)
+        if lower_bound < min_ver:
+            reporter.add_warning(
+                package=dep.name,
+                message=f"{dep.name} {version_str} support can be dropped per PHEP 3",
+                details=f"Version {version_str} is older than the minimum required version ({dep.name}>={min_supported})",
+            )
 
 
 def _check_adoption(
@@ -260,17 +374,25 @@ def _check_adoption(
     if not pkg_versions:
         return
 
-    # Find versions that must be supported but might not be
+    # Find all versions that must be supported now
     bounds = extract_version_bounds(dep.specifier)
 
+    # Collect all required versions and check which are allowed
+    required_versions = []
     for version_str, version_info in pkg_versions.items():
-        # Check if this version must be supported now
-        if not version_info.must_be_supported(now):
-            continue
+        if version_info.must_be_supported(now):
+            required_versions.append((version_str, Version(version_str)))
 
-        version = Version(version_str)
+    if not required_versions:
+        return
 
-        # If there's an upper bound that excludes this version, it's a violation
+    # Check each required version
+    excluded_by_upper = []
+    excluded_by_exact = []
+    excluded_by_not_equal = []
+
+    for version_str, version in required_versions:
+        # Check if excluded by upper bound
         if bounds.upper:
             if bounds.upper_inclusive:
                 excluded = version > bounds.upper
@@ -278,21 +400,58 @@ def _check_adoption(
                 excluded = version >= bounds.upper
 
             if excluded:
-                reporter.add_error(
-                    package=dep.name,
-                    message=f"{dep.raw} does not support required version {version_str}",
-                    details=f"Version {version_str} must be supported within 6 months of release",
-                    suggestion=f"Update upper bound to include {version_str}",
-                )
+                excluded_by_upper.append(version_str)
+                continue
 
-        # If there's an exact constraint that doesn't match, it's a violation
-        if bounds.exact and bounds.exact != version:
-            reporter.add_error(
-                package=dep.name,
-                message=f"{dep.raw} does not support required version {version_str}",
-                details=f"Exact constraint prevents supporting {version_str}",
-                suggestion=f"Remove exact constraint",
-            )
+        # Check if excluded by exact constraint
+        if bounds.exact:
+            # For exact constraints, only the exact version is allowed
+            # Check if major.minor matches (e.g., ==1.26.0 should allow 1.26)
+            if not (bounds.exact.major == version.major and bounds.exact.minor == version.minor):
+                excluded_by_exact.append(version_str)
+                continue
+
+        # Check if excluded by != constraints
+        if bounds.exclusions:
+            for excl in bounds.exclusions:
+                # Match on major.minor
+                if excl.major == version.major and excl.minor == version.minor:
+                    excluded_by_not_equal.append(version_str)
+                    break
+
+    # Report errors for versions excluded by upper bound
+    for version_str in excluded_by_upper:
+        reporter.add_error(
+            package=dep.name,
+            message=f"{dep.raw} does not support required version {version_str}",
+            details=f"Version {version_str} must be supported within 6 months of release",
+            suggestion=f"Update upper bound to include {version_str}",
+        )
+
+    # Report errors for versions excluded by exact constraint
+    for version_str in excluded_by_exact:
+        reporter.add_error(
+            package=dep.name,
+            message=f"{dep.raw} does not support required version {version_str}",
+            details=f"Exact constraint prevents supporting {version_str}",
+            suggestion=f"Remove exact constraint",
+        )
+
+    # For != exclusions, only error if ALL required versions are excluded
+    # (e.g., numpy!=2.0 is fine if 2.1 is also required and allowed)
+    allowed_versions = [
+        v for v, _ in required_versions
+        if v not in excluded_by_upper and v not in excluded_by_exact and v not in excluded_by_not_equal
+    ]
+
+    if excluded_by_not_equal and not allowed_versions:
+        # All required versions are excluded
+        reporter.add_error(
+            package=dep.name,
+            message=f"{dep.raw} excludes all required versions",
+            details=f"Exclusions prevent supporting any of: {', '.join(excluded_by_not_equal)}",
+            suggestion=f"Remove exclusions or ensure at least one required version is allowed",
+        )
 
 
 def check_pyproject(
@@ -300,6 +459,7 @@ def check_pyproject(
     schedule_path: str | Path | None = None,
     check_adoption: bool = True,
     fail_on_warning: bool = False,
+    use_uv_fallback: bool = True,
 ) -> tuple[bool, Reporter]:
     """High-level function to check a pyproject.toml file.
 
@@ -308,6 +468,7 @@ def check_pyproject(
         schedule_path: Path to schedule.json (optional, will use defaults)
         check_adoption: Whether to check 6-month adoption rule
         fail_on_warning: Whether warnings should cause failure
+        use_uv_fallback: Whether to use uv for legacy format extraction
 
     Returns:
         Tuple of (passed, reporter)
@@ -337,6 +498,7 @@ def check_pyproject(
         schedule=schedule,
         reporter=reporter,
         check_adoption=check_adoption,
+        use_uv_fallback=use_uv_fallback,
     )
 
     # Adjust for fail_on_warning

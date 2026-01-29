@@ -186,6 +186,103 @@ class Schedule:
         from packaging.version import Version
         return str(max(Version(v) for v in pkg_versions.keys()))
 
+    def get_required_python_versions(self, now: datetime | None = None) -> list[str]:
+        """Get all Python versions that must be supported now.
+
+        Returns all versions where must_be_supported(now) is True.
+
+        Args:
+            now: Current time (defaults to now)
+
+        Returns:
+            List of version strings (e.g., ["3.10", "3.11", "3.12"])
+        """
+        now = now or datetime.now(timezone.utc)
+
+        return [
+            version
+            for version, sched in self.python.items()
+            if sched.must_be_supported(now)
+        ]
+
+    def get_required_package_versions(
+        self, package: str, now: datetime | None = None
+    ) -> list[str]:
+        """Get all versions of a package that must be supported now.
+
+        Returns all versions where must_be_supported(now) is True.
+
+        Args:
+            package: Package name
+            now: Current time (defaults to now)
+
+        Returns:
+            List of version strings (e.g., ["1.25", "1.26", "2.0"])
+        """
+        now = now or datetime.now(timezone.utc)
+
+        pkg_versions = self.packages.get(package, {})
+        if not pkg_versions:
+            return []
+
+        return [
+            version
+            for version, sched in pkg_versions.items()
+            if sched.must_be_supported(now)
+        ]
+
+    def get_non_droppable_python_versions(self, now: datetime | None = None) -> list[str]:
+        """Get all Python versions that cannot be dropped yet.
+
+        Returns all versions where is_droppable(now) is False.
+
+        Args:
+            now: Current time (defaults to now)
+
+        Returns:
+            List of version strings sorted from oldest to newest
+        """
+        now = now or datetime.now(timezone.utc)
+
+        supported = [
+            version
+            for version, sched in self.python.items()
+            if not sched.is_droppable(now)
+        ]
+
+        # Sort by version
+        return sorted(supported, key=lambda v: [int(x) for x in v.split(".")])
+
+    def get_non_droppable_package_versions(
+        self, package: str, now: datetime | None = None
+    ) -> list[str]:
+        """Get all versions of a package that cannot be dropped yet.
+
+        Returns all versions where is_droppable(now) is False.
+
+        Args:
+            package: Package name
+            now: Current time (defaults to now)
+
+        Returns:
+            List of version strings sorted from oldest to newest
+        """
+        now = now or datetime.now(timezone.utc)
+
+        pkg_versions = self.packages.get(package, {})
+        if not pkg_versions:
+            return []
+
+        from packaging.version import Version
+
+        supported = [
+            version
+            for version, sched in pkg_versions.items()
+            if not sched.is_droppable(now)
+        ]
+
+        return sorted(supported, key=lambda v: Version(v))
+
 
 def create_python_schedule() -> dict[str, VersionSchedule]:
     """Create Python version schedule from known releases."""

@@ -58,6 +58,12 @@ Examples:
     )
 
     parser.add_argument(
+        "--no-uv-fallback",
+        action="store_true",
+        help="Disable uv-based metadata extraction for legacy formats",
+    )
+
+    parser.add_argument(
         "--generate-schedule",
         action="store_true",
         help="Generate/update schedule.json from PyPI (requires network)",
@@ -104,6 +110,7 @@ Examples:
         schedule_path=schedule_path,
         check_adoption=not parsed_args.no_adoption_check,
         fail_on_warning=parsed_args.fail_on_warning,
+        use_uv_fallback=not parsed_args.no_uv_fallback,
     )
 
     # Output results

@@ -32,6 +32,12 @@ class VersionBounds:
     upper_inclusive: bool = True
     exact: Version | None = None
     has_upper_constraint: bool = False
+    exclusions: list[Version] | None = None
+    is_wildcard: bool = False
+
+    def __post_init__(self):
+        if self.exclusions is None:
+            self.exclusions = []
 
     @property
     def has_max_constraint(self) -> bool:
@@ -179,7 +185,38 @@ def extract_version_bounds(specifier: SpecifierSet | None) -> VersionBounds:
 
     for spec in specifier:
         op = spec.operator
-        version = Version(spec.version)
+        version_str = spec.version
+
+        # Handle wildcards like ==1.26.*
+        if op == "==" and version_str.endswith(".*"):
+            bounds.is_wildcard = True
+            base_version = version_str[:-2]  # Remove ".*"
+            parts = base_version.split(".")
+
+            # Set lower bound
+            try:
+                bounds.lower = Version(base_version + ".0")
+            except InvalidVersion:
+                bounds.lower = Version(base_version)
+            bounds.lower_inclusive = True
+
+            # Set upper bound (next minor/major version)
+            if len(parts) >= 2:
+                # e.g., 1.26.* -> upper is 1.27.0
+                upper_parts = parts[:-1] + [str(int(parts[-1]) + 1)]
+                bounds.upper = Version(".".join(upper_parts) + ".0")
+            else:
+                # e.g., 1.* -> upper is 2.0
+                bounds.upper = Version(str(int(parts[0]) + 1) + ".0")
+            bounds.upper_inclusive = False
+            bounds.has_upper_constraint = True
+            continue
+
+        try:
+            version = Version(version_str)
+        except InvalidVersion:
+            # Skip invalid versions
+            continue
 
         if op == ">=":
             if bounds.lower is None or version > bounds.lower:
@@ -190,23 +227,40 @@ def extract_version_bounds(specifier: SpecifierSet | None) -> VersionBounds:
                 bounds.lower = version
                 bounds.lower_inclusive = False
         elif op == "<=":
-            bounds.upper = version
-            bounds.upper_inclusive = True
+            # Only set upper bound if we don't have one or this is more restrictive
+            if bounds.upper is None or version < bounds.upper:
+                bounds.upper = version
+                bounds.upper_inclusive = True
             bounds.has_upper_constraint = True
         elif op == "<":
-            bounds.upper = version
-            bounds.upper_inclusive = False
+            # Only set upper bound if we don't have one or this is more restrictive
+            if bounds.upper is None or version < bounds.upper:
+                bounds.upper = version
+                bounds.upper_inclusive = False
             bounds.has_upper_constraint = True
         elif op == "==":
             bounds.exact = version
         elif op == "!=":
-            # Exclusions don't affect bounds
-            pass
+            # Track exclusions for later checking
+            bounds.exclusions.append(version)
         elif op == "~=":
-            # Compatible release: ~=X.Y means >=X.Y, ==X.*
+            # Compatible release: ~=X.Y means >=X.Y, <(X+1).0 or ~=X.Y.Z means >=X.Y.Z, <X.(Y+1).0
             bounds.lower = version
             bounds.lower_inclusive = True
-            # Upper bound is implicit (same major.minor)
+            bounds.has_upper_constraint = True
+
+            # Compute implicit upper bound
+            release = version.release
+            if len(release) >= 2:
+                # ~=1.26 -> <2.0.0, ~=1.26.1 -> <1.27.0
+                if len(release) == 2:
+                    # ~=1.26 means >=1.26, <2.0
+                    upper_parts = [str(release[0] + 1), "0", "0"]
+                else:
+                    # ~=1.26.1 means >=1.26.1, <1.27.0
+                    upper_parts = [str(release[0]), str(release[1] + 1), "0"]
+                bounds.upper = Version(".".join(upper_parts))
+                bounds.upper_inclusive = False
 
     return bounds
 
@@ -230,6 +284,26 @@ def extract_python_version(requires_python: str | None) -> Version | None:
 
     bounds = extract_version_bounds(specifier)
     return bounds.lower
+
+
+def extract_python_bounds(requires_python: str | None) -> VersionBounds:
+    """Extract full version bounds from requires-python.
+
+    Args:
+        requires_python: The requires-python string from pyproject.toml
+
+    Returns:
+        VersionBounds with lower and upper bounds
+    """
+    if not requires_python:
+        return VersionBounds()
+
+    try:
+        specifier = SpecifierSet(requires_python)
+    except InvalidSpecifier:
+        return VersionBounds()
+
+    return extract_version_bounds(specifier)
 
 
 def get_dependencies_from_pyproject(pyproject_data: dict) -> list[ParsedDependency]:
