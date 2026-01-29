@@ -96,6 +96,30 @@ def extract_metadata_with_uv(
         except (subprocess.TimeoutExpired, FileNotFoundError):
             return None
 
+        # Capture .dist-info directories BEFORE install
+        # We use set difference (before vs after) to find the newly installed package.
+        # This is more reliable than sorting by mtime, which can be wrong in seeded
+        # venvs, concurrent installs, or when tools touch metadata post-install.
+        list_dists_script = """
+import os, sys, json
+site_packages = [p for p in sys.path if 'site-packages' in p]
+if site_packages:
+    dists = [d for d in os.listdir(site_packages[0]) if d.endswith('.dist-info')]
+    print(json.dumps(dists))
+else:
+    print(json.dumps([]))
+"""
+        try:
+            result = subprocess.run(
+                [str(venv_path / "bin" / "python"), "-c", list_dists_script],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            dists_before = set(json.loads(result.stdout)) if result.returncode == 0 else set()
+        except (subprocess.TimeoutExpired, json.JSONDecodeError):
+            dists_before = set()
+
         # Install package without dependencies
         try:
             result = subprocess.run(
@@ -116,27 +140,27 @@ def extract_metadata_with_uv(
             return None
 
         # Extract metadata using Python
-        extract_script = """
+        # Pass the "before" set so the script can find the newly installed package
+        dists_before_json = json.dumps(list(dists_before))
+        extract_script = f"""
 import json
 import sys
+DISTS_BEFORE = set(json.loads('''{dists_before_json}'''))
 try:
     from importlib.metadata import metadata, requires
-    # Find the installed package
     import os
     site_packages = [p for p in sys.path if 'site-packages' in p][0]
-    dist_infos = [d for d in os.listdir(site_packages) if d.endswith('.dist-info')]
-    if not dist_infos:
-        print(json.dumps({"error": "No package found"}))
+    dists_after = set(d for d in os.listdir(site_packages) if d.endswith('.dist-info'))
+
+    # Find the newly installed package by set difference
+    new_dists = dists_after - DISTS_BEFORE
+    if not new_dists:
+        print(json.dumps({{"error": "No new package found after install"}}))
         sys.exit(1)
 
-    # Get the most recently modified .dist-info (the one we just installed)
-    dist_infos.sort(
-        key=lambda d: os.path.getmtime(os.path.join(site_packages, d)),
-        reverse=True
-    )
-
-    # Get package name from dist-info
-    pkg_name = dist_infos[0].rsplit('-', 1)[0].replace('_', '-')
+    # Get package name from the new dist-info
+    new_dist = list(new_dists)[0]
+    pkg_name = new_dist.rsplit('-', 1)[0].replace('_', '-')
 
     meta = metadata(pkg_name)
     reqs = requires(pkg_name) or []
