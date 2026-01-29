@@ -114,24 +114,26 @@ def _check_python_version(
             rec_parts = [int(p) for p in recommended.split(".")]
             min_parts = [min_version.major, min_version.minor]
             if min_parts < rec_parts:
-                reporter.add_error(
+                # This is a WARNING, not an error - packages CAN drop old versions but don't have to
+                reporter.add_warning(
                     package="python",
-                    message=f"requires-python = \">={version_str}\" violates PHEP 3",
-                    details=f"Python {version_str} is older than the minimum supported version",
-                    suggestion=f">={recommended}",
+                    message=f"Python {version_str} support can be dropped per PHEP 3",
+                    details=f"Python {version_str} is older than the minimum required version",
+                    suggestion=f"Consider updating to >={recommended}",
                 )
         return
 
-    # Check if version can be dropped
+    # Check if version can be dropped - this is informational (WARNING), not an error
+    # PHEP 3 says packages CAN drop support after the window, not that they MUST
     if version_info.is_droppable(now):
         months = version_info.months_since_release(now)
         recommended = schedule.get_minimum_python_version(now)
 
-        reporter.add_error(
+        reporter.add_warning(
             package="python",
-            message=f"requires-python = \">={version_str}\" violates PHEP 3",
+            message=f"Python {version_str} support can be dropped per PHEP 3",
             details=f"Python {version_str} released {months} months ago (>{PYTHON_SUPPORT_MONTHS} months)",
-            suggestion=f">={recommended}" if recommended else None,
+            suggestion=f"Consider updating to >={recommended}" if recommended else None,
         )
 
 
@@ -219,25 +221,26 @@ def _check_lower_bound(
         if min_supported:
             min_ver = Version(min_supported)
             if lower_bound < min_ver:
-                months_estimate = "many"  # Can't calculate exact without release date
-                reporter.add_error(
+                # This is a WARNING - packages CAN drop old versions but don't have to
+                reporter.add_warning(
                     package=dep.name,
-                    message=f"{dep.raw} violates PHEP 3",
-                    details=f"Version {version_str} is older than the minimum supported version",
-                    suggestion=f"{dep.name}>={min_supported}",
+                    message=f"{dep.name} {version_str} support can be dropped per PHEP 3",
+                    details=f"Version {version_str} is older than the minimum required version",
+                    suggestion=f"Consider updating to {dep.name}>={min_supported}",
                 )
         return
 
-    # Check if this version can be dropped
+    # Check if this version can be dropped - this is informational (WARNING), not an error
+    # PHEP 3 says packages CAN drop support after the window, not that they MUST
     if version_info.is_droppable(now):
         months = version_info.months_since_release(now)
         min_supported = schedule.get_minimum_package_version(pkg_name, now)
 
-        reporter.add_error(
+        reporter.add_warning(
             package=dep.name,
-            message=f"{dep.raw} violates PHEP 3",
+            message=f"{dep.name} {version_str} support can be dropped per PHEP 3",
             details=f"Version {version_str} released {months} months ago (>{PACKAGE_SUPPORT_MONTHS} months)",
-            suggestion=f"{dep.name}>={min_supported}" if min_supported else None,
+            suggestion=f"Consider updating to {dep.name}>={min_supported}" if min_supported else None,
         )
 
 

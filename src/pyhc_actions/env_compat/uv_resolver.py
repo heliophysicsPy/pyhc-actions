@@ -139,8 +139,8 @@ def check_compatibility(
         for conflict in conflicts:
             reporter.add_error(
                 package=conflict.package,
-                message="Dependency conflict with PyHC Environment",
-                details=f"Your package: {conflict.your_requirement}\n"
+                message=f"Dependency conflict: {conflict.package}",
+                details=f"Your requirement: {conflict.your_requirement}\n"
                 f"PyHC Environment: {conflict.pyhc_requirement}\n"
                 f"{conflict.reason}",
             )
@@ -180,8 +180,7 @@ def parse_uv_error(stderr: str) -> list[Conflict]:
 
     Or:
     "error: No solution found when resolving dependencies:
-      x numpy>=2.0.0
-      Because you require numpy>=2.0.0 and numpy>=2.0.0 depends on numpy[...], ..."
+      ╰─▶ Because package-a==1.0.0 depends on numpy>=2.0 and package-b==1.0.0 depends on numpy<2.0..."
 
     Args:
         stderr: Standard error output from uv
@@ -190,71 +189,81 @@ def parse_uv_error(stderr: str) -> list[Conflict]:
         List of Conflict objects
     """
     conflicts = []
+    seen_packages = set()  # Track packages we've already reported to avoid duplicates
 
-    # Pattern 1: "requires X and Y requires Z" style
+    # Pattern 1: "X requires pkg-spec and Y requires pkg-spec" style
+    # This captures: "Because foo requires numpy<2.0 and bar requires numpy>=2.0"
     pattern1 = re.compile(
-        r"Because\s+(\S+)\s+requires\s+(\S+)\s+and\s+(\S+)\s+requires\s+(\S+)",
+        r"Because\s+(\S+)\s+requires\s+([a-zA-Z0-9_-]+)([<>=!][^\s,]+)\s+and\s+(\S+)\s+requires\s+([a-zA-Z0-9_-]+)([<>=!][^\s,]+)",
         re.IGNORECASE,
     )
 
-    # Pattern 2: "version solving failed" with requirement lists
+    # Pattern 2: "X depends on pkg-spec and Y depends on pkg-spec" style
     pattern2 = re.compile(
-        r"The following packages are incompatible:\s*\n(.*?)(?:\n\n|\Z)",
-        re.DOTALL,
-    )
-
-    # Pattern 3: Generic conflict pattern
-    pattern3 = re.compile(
-        r"(\S+)\s+requires\s+(\S+[<>=!]+\S+).*?conflicts?\s+with\s+(\S+[<>=!]+\S+)",
+        r"(\S+)\s+depends\s+on\s+([a-zA-Z0-9_-]+)([<>=!][^\s,]+)\s+and\s+(\S+)\s+depends\s+on\s+([a-zA-Z0-9_-]+)([<>=!][^\s,]+)",
         re.IGNORECASE,
     )
 
     # Try pattern 1
     for match in pattern1.finditer(stderr):
-        pkg1_name, req1, pkg2_name, req2 = match.groups()
+        source1, pkg1, spec1, source2, pkg2, spec2 = match.groups()
 
-        # Extract package name from requirement
-        pkg_name = re.match(r"([a-zA-Z0-9_-]+)", req1)
-        if pkg_name:
-            conflicts.append(
-                Conflict(
-                    package=pkg_name.group(1),
-                    your_requirement=req1,
-                    pyhc_requirement=req2,
-                    reason=f"{pkg1_name} and {pkg2_name} have incompatible requirements",
-                )
-            )
-
-    # If no conflicts found, try to extract from general error message
-    if not conflicts:
-        # Look for version requirements in the error
-        req_pattern = re.compile(r"([a-zA-Z0-9_-]+)([<>=!]+[0-9.]+(?:,[<>=!]+[0-9.]+)*)")
-
-        requirements_found = {}
-        for match in req_pattern.finditer(stderr):
-            pkg_name, version_spec = match.groups()
-            if pkg_name not in requirements_found:
-                requirements_found[pkg_name] = []
-            requirements_found[pkg_name].append(version_spec)
-
-        # Check for packages with multiple conflicting requirements
-        for pkg_name, specs in requirements_found.items():
-            if len(specs) >= 2:
+        # Only report if it's the same package with different specs
+        if pkg1.lower() == pkg2.lower() and pkg1.lower() not in seen_packages:
+            # Check specs are actually different (not identical)
+            if spec1 != spec2:
+                seen_packages.add(pkg1.lower())
                 conflicts.append(
                     Conflict(
-                        package=pkg_name,
-                        your_requirement=specs[0] if specs else "unknown",
-                        pyhc_requirement=specs[1] if len(specs) > 1 else "unknown",
-                        reason="No overlapping version range",
+                        package=pkg1,
+                        your_requirement=f"{pkg1}{spec1}",
+                        pyhc_requirement=f"{pkg2}{spec2}",
+                        reason=f"Incompatible requirements from {source1} and {source2}",
                     )
                 )
 
-    # If still no conflicts, create a generic one from the error message
+    # Try pattern 2
+    for match in pattern2.finditer(stderr):
+        source1, pkg1, spec1, source2, pkg2, spec2 = match.groups()
+
+        if pkg1.lower() == pkg2.lower() and pkg1.lower() not in seen_packages:
+            if spec1 != spec2:
+                seen_packages.add(pkg1.lower())
+                conflicts.append(
+                    Conflict(
+                        package=pkg1,
+                        your_requirement=f"{pkg1}{spec1}",
+                        pyhc_requirement=f"{pkg2}{spec2}",
+                        reason=f"Incompatible requirements from {source1} and {source2}",
+                    )
+                )
+
+    # Pattern 3: Look for explicit "X and Y are incompatible" with package names
+    pattern3 = re.compile(
+        r"([a-zA-Z0-9_-]+)([<>=!]+[0-9][0-9.]*)\s+.*?\s+([a-zA-Z0-9_-]+)([<>=!]+[0-9][0-9.]*)\s+are\s+incompatible",
+        re.IGNORECASE,
+    )
+
+    for match in pattern3.finditer(stderr):
+        pkg1, spec1, pkg2, spec2 = match.groups()
+        if pkg1.lower() == pkg2.lower() and pkg1.lower() not in seen_packages:
+            if spec1 != spec2:
+                seen_packages.add(pkg1.lower())
+                conflicts.append(
+                    Conflict(
+                        package=pkg1,
+                        your_requirement=f"{pkg1}{spec1}",
+                        pyhc_requirement=f"{pkg2}{spec2}",
+                        reason="Version requirements are incompatible",
+                    )
+                )
+
+    # If still no conflicts found, create a generic one from the error message
     if not conflicts and "No solution found" in stderr:
         conflicts.append(
             Conflict(
                 package="dependencies",
-                your_requirement="see error output",
+                your_requirement="(see error details)",
                 pyhc_requirement="PyHC Environment",
                 reason=_extract_error_summary(stderr),
             )

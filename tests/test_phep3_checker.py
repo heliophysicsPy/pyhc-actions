@@ -184,9 +184,11 @@ dependencies = []
             reporter = Reporter()
             passed = check_compliance(f.name, schedule, reporter)
 
-            # Should fail - 3.8 is too old
-            assert passed is False
-            assert reporter.has_errors
+            # Should pass (no errors) but with warning - 3.8 is old but can still be supported
+            # PHEP 3 says packages CAN drop old versions, not MUST drop
+            assert passed is True
+            assert reporter.has_warnings
+            assert not reporter.has_errors
 
     def test_upper_bound_warning(self, schedule):
         """Test that upper bounds generate warnings."""
