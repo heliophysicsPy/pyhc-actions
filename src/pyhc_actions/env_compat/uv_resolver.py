@@ -133,6 +133,18 @@ def check_compatibility(
             )
             return True, []  # Not a real conflict
 
+        # Check if error is due to Python version mismatch
+        is_python_error, required_version = _is_python_version_error(result.stderr)
+        if is_python_error:
+            reporter.add_warning(
+                package="python",
+                message="PyHC Environment requires a newer Python version",
+                details=f"The PyHC Environment requires {required_version}.\n"
+                "This check cannot run on older Python versions.\n"
+                "Run with a compatible Python version to verify package compatibility.",
+            )
+            return True, []  # Not a package conflict
+
         # Parse conflicts from error output
         conflicts = parse_uv_error(result.stderr)
 
@@ -169,6 +181,27 @@ def _is_platform_specific_error(stderr: str) -> bool:
     ]
     stderr_lower = stderr.lower()
     return any(indicator in stderr_lower for indicator in platform_indicators)
+
+
+def _is_python_version_error(stderr: str) -> tuple[bool, str | None]:
+    """Check if the error is due to Python version mismatch.
+
+    This occurs when the PyHC Environment requires a newer Python version
+    than the one running the check. This is not a conflict with the package
+    being tested - it's a limitation of the test environment.
+
+    Returns:
+        Tuple of (is_python_error, required_version or None)
+    """
+    # Look for "current Python version (X.Y.Z) does not satisfy Python>=X.Y"
+    match = re.search(
+        r"current python version \([\d.]+\) does not satisfy python([<>=!]+[\d.]+)",
+        stderr.lower(),
+    )
+    if match:
+        return True, f"Python{match.group(1)}"
+
+    return False, None
 
 
 def parse_uv_error(stderr: str) -> list[Conflict]:
@@ -283,7 +316,7 @@ def _extract_error_summary(stderr: str) -> str:
         if line and not line.startswith("hint:"):
             summary_lines.append(line)
 
-    return " ".join(summary_lines)[:200]
+    return " ".join(summary_lines)
 
 
 def run_uv_lock_check(

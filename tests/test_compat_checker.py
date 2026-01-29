@@ -7,6 +7,7 @@ from pyhc_actions.env_compat.uv_resolver import (
     parse_uv_error,
     find_uv,
     Conflict,
+    _is_python_version_error,
 )
 from pyhc_actions.env_compat.fetcher import (
     parse_requirements_for_uv,
@@ -139,3 +140,36 @@ class TestConflict:
         assert conflict.package == "numpy"
         assert conflict.your_requirement == "numpy<2.0"
         assert conflict.pyhc_requirement == "numpy>=2.0"
+
+
+class TestPythonVersionError:
+    """Tests for Python version error detection."""
+
+    def test_detect_python_version_error(self):
+        """Test detecting Python version mismatch error."""
+        stderr = """
+error: No solution found when resolving dependencies:
+╰─▶ Because the current Python version (3.11.14) does not satisfy Python>=3.12
+    and aiapy==0.11.0 depends on Python>=3.12, we can conclude that aiapy==0.11.0
+    cannot be used.
+"""
+        is_error, required = _is_python_version_error(stderr)
+        assert is_error is True
+        assert required == "Python>=3.12"
+
+    def test_not_python_version_error(self):
+        """Test that package conflicts are not detected as Python errors."""
+        stderr = """
+error: No solution found when resolving dependencies:
+Because project requires numpy<2.0 and pyhc-environment requires numpy>=2.0,
+we can conclude that project and pyhc-environment are incompatible.
+"""
+        is_error, required = _is_python_version_error(stderr)
+        assert is_error is False
+        assert required is None
+
+    def test_empty_stderr(self):
+        """Test handling empty stderr."""
+        is_error, required = _is_python_version_error("")
+        assert is_error is False
+        assert required is None
