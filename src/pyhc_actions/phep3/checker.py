@@ -144,6 +144,10 @@ def _check_python_version(
     bounds = extract_python_bounds(requires_python)
     min_version = bounds.lower
 
+    # For exact pins without lower bound, use the exact version as the effective lower bound
+    if not min_version and bounds.exact:
+        min_version = bounds.exact
+
     if not min_version:
         reporter.add_warning(
             package="python",
@@ -225,6 +229,20 @@ def _check_python_version(
                             details=f"Python {py_version} must be supported per PHEP 3",
                             suggestion=f"Remove !={excl} from requires-python",
                         )
+
+    # Check exact pin (non-wildcard) - ERROR if it excludes a required version
+    if bounds.exact and not bounds.is_wildcard:
+        for py_version, py_info in schedule.python.items():
+            if py_info.must_be_supported(now):
+                py_ver = Version(py_version)
+                # Exact pin only allows the pinned version
+                if not (bounds.exact.major == py_ver.major and bounds.exact.minor == py_ver.minor):
+                    reporter.add_error(
+                        package="python",
+                        message=f"requires-python = \"{requires_python}\" excludes required Python {py_version}",
+                        details=f"Exact pin only allows Python {bounds.exact.major}.{bounds.exact.minor}, but {py_version} must be supported per PHEP 3",
+                        suggestion=f"Use >= instead of == to allow newer Python versions",
+                    )
 
 
 def _check_dependency(

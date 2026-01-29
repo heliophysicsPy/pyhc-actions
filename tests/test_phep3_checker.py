@@ -425,6 +425,30 @@ dependencies = []
             error_messages = [e.message for e in reporter.errors]
             assert any("blocks adoption" in msg for msg in error_messages)
 
+    def test_python_exact_pin_excludes_required(self, schedule):
+        """Test that ==3.10 when 3.11 and 3.12 must be supported produces an ERROR."""
+        content = """
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = "==3.10"
+dependencies = []
+"""
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".toml", delete=False
+        ) as f:
+            f.write(content)
+            f.flush()
+
+            reporter = Reporter()
+            passed = check_compliance(f.name, schedule, reporter, use_uv_fallback=False)
+
+            # Should fail - 3.11 and 3.12 must be supported but exact pin excludes them
+            assert passed is False
+            assert reporter.has_errors
+            error_messages = [e.message for e in reporter.errors]
+            assert any("excludes required Python" in msg for msg in error_messages)
+
     def test_package_lower_bound_too_high_is_error(self, schedule):
         """Test that numpy>=2.0 when 1.25 must be supported produces an ERROR."""
         content = """

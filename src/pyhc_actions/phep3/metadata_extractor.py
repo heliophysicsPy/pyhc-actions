@@ -129,6 +129,12 @@ try:
         print(json.dumps({"error": "No package found"}))
         sys.exit(1)
 
+    # Get the most recently modified .dist-info (the one we just installed)
+    dist_infos.sort(
+        key=lambda d: os.path.getmtime(os.path.join(site_packages, d)),
+        reverse=True
+    )
+
     # Get package name from dist-info
     pkg_name = dist_infos[0].rsplit('-', 1)[0].replace('_', '-')
 
