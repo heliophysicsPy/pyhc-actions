@@ -234,12 +234,15 @@ def check_compatibility(
         conflicts = parse_uv_error(result.stderr)
 
         for conflict in conflicts:
+            # Generate suggestion based on PyHC requirement
+            suggestion = f"Support {conflict.pyhc_requirement}"
             reporter.add_error(
                 package=conflict.package,
                 message=f"Dependency conflict: {conflict.package}",
                 details=f"Your requirement: {conflict.your_requirement}\n"
                 f"PyHC Environment: {conflict.pyhc_requirement}\n"
                 f"{conflict.reason}",
+                suggestion=suggestion,
             )
 
         return False, conflicts
