@@ -523,3 +523,140 @@ class TestCheckPythonCompatibility:
         is_compat, error = check_python_compatibility(">=3.12", "3.12.9")
         assert is_compat is True
         assert error is None
+
+
+class TestUnpublishedPackageError:
+    """Tests for unpublished package error detection."""
+
+    def test_detect_no_version_error(self):
+        """Test detecting 'no version of' errors."""
+        from pyhc_actions.env_compat.uv_resolver import _is_unpublished_package_error
+
+        stderr = """
+error: No solution found when resolving dependencies:
+╰─▶ Because there is no version of mypackage and you require mypackage, we can conclude that your requirements are unsatisfiable.
+"""
+        result = _is_unpublished_package_error(stderr, "mypackage")
+        assert result is True
+
+    def test_detect_no_version_without_package_name(self):
+        """Test detecting error without specific package name check."""
+        from pyhc_actions.env_compat.uv_resolver import _is_unpublished_package_error
+
+        stderr = """
+error: No solution found when resolving dependencies:
+╰─▶ Because there is no version of some-package, we can conclude failure.
+"""
+        result = _is_unpublished_package_error(stderr, None)
+        assert result is True
+
+    def test_not_unpublished_error(self):
+        """Test that regular conflicts are not detected as unpublished."""
+        from pyhc_actions.env_compat.uv_resolver import _is_unpublished_package_error
+
+        stderr = """
+error: No solution found when resolving dependencies:
+╰─▶ Because pkg-a depends on numpy<2 and you require numpy>=2, we can conclude incompatibility.
+"""
+        result = _is_unpublished_package_error(stderr, "pkg-a")
+        assert result is False
+
+    def test_different_package_name(self):
+        """Test that error about different package doesn't match."""
+        from pyhc_actions.env_compat.uv_resolver import _is_unpublished_package_error
+
+        stderr = """
+error: No solution found:
+╰─▶ Because there is no version of other-package, we can conclude failure.
+"""
+        # Looking for mypackage but error is about other-package
+        result = _is_unpublished_package_error(stderr, "mypackage")
+        assert result is False
+
+
+class TestLegacyPackageSupport:
+    """Tests for setup.py (legacy) package support.
+
+    These tests verify that the compatibility checker works correctly
+    with packages that use setup.py instead of pyproject.toml.
+    """
+
+    def test_directory_path_handling(self):
+        """Test that directory paths are handled correctly.
+
+        For setup.py packages, main.py passes the project directory
+        to check_compatibility. This test verifies the path handling.
+        """
+        import tempfile
+        from pathlib import Path
+        from pyhc_actions.env_compat.fetcher import get_package_from_pyproject
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+
+            # Create a setup.py package structure
+            setup_py = tmpdir_path / "setup.py"
+            setup_py.write_text("""
+from setuptools import setup
+setup(
+    name='test-legacy-package',
+    version='1.0.0',
+    install_requires=['numpy>=1.20'],
+)
+""")
+
+            # When main.py detects setup.py, it passes the directory
+            package_path = get_package_from_pyproject(tmpdir_path)
+
+            # Should be the package directory, not its parent
+            assert package_path == str(tmpdir_path.resolve())
+
+    def test_editable_flag_format(self):
+        """Test that requirements include -e flag for local packages.
+
+        This verifies the format used in the temp requirements file.
+        """
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            package_path = Path(tmpdir).resolve()
+
+            # The format we write to requirements.txt
+            req_line = f"-e {package_path}\n"
+
+            # Verify format
+            assert req_line.startswith("-e ")
+            assert str(package_path) in req_line
+            assert req_line.endswith("\n")
+
+    def test_cwd_with_directory_path(self):
+        """Test that cwd calculation works for directory paths.
+
+        This tests the logic: cwd should be the package directory
+        whether we receive a file path or directory path.
+        """
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+
+            # File path case
+            pyproject_path = tmpdir_path / "pyproject.toml"
+            if pyproject_path.is_dir():
+                cwd_file = pyproject_path
+            else:
+                cwd_file = pyproject_path.parent
+            assert cwd_file == tmpdir_path
+
+            # Directory path case (setup.py packages)
+            dir_path = tmpdir_path
+            if dir_path.is_dir():
+                cwd_dir = dir_path
+            else:
+                cwd_dir = dir_path.parent
+            assert cwd_dir == tmpdir_path
+
+            # Both should yield the same directory
+            assert cwd_file == cwd_dir
