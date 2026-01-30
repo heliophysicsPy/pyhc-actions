@@ -69,35 +69,7 @@ runs:
 
         if [ -n "$SCHEDULE_FILE" ] && [ -f "$SCHEDULE_FILE" ]; then
           # Extract minimum Python version from schedule.json
-          # Find Python versions where drop_date > now
-          MIN_PYTHON=$(python3 <<PYTHON_SCRIPT 2>/dev/null || echo "3.12"
-import json
-import sys
-from datetime import datetime, timezone
-
-schedule_file = '$SCHEDULE_FILE'
-try:
-    with open(schedule_file) as f:
-        data = json.load(f)
-
-    now = datetime.now(timezone.utc)
-    supported = []
-    for version, info in data.get('python', {}).items():
-        drop_date = datetime.fromisoformat(info['drop_date'].replace('Z', '+00:00'))
-        if drop_date > now:
-            supported.append(version)
-
-    if supported:
-        # Sort and get minimum
-        supported.sort(key=lambda v: [int(x) for x in v.split('.')])
-        print(supported[0])
-    else:
-        print('3.12')  # Fallback
-except Exception as e:
-    print('3.12', file=sys.stderr)
-    print('3.12')
-PYTHON_SCRIPT
-)
+          MIN_PYTHON=$(python3 "${{ github.action_path }}/get_min_python.py" "$SCHEDULE_FILE" 2>/dev/null || echo "3.12")
         else
           MIN_PYTHON="3.12"
         fi
