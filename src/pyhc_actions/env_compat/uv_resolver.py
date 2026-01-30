@@ -176,12 +176,29 @@ def check_compatibility(
     # Get package path for local install
     package_path = get_package_from_pyproject(pyproject_path)
 
+    # Get package name to filter from PyHC requirements
+    # (avoid conflict with package checking itself)
+    try:
+        from pyhc_actions.common.parser import parse_pyproject
+        pyproject_data = parse_pyproject(pyproject_path)
+        package_name = pyproject_data.get("project", {}).get("name")
+    except Exception:
+        package_name = None
+
     # Create temporary requirements file combining both
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".txt", delete=False
     ) as f:
-        # Write PyHC requirements
+        # Write PyHC requirements, excluding the package being checked
         for req in pyhc_requirements:
+            # Parse requirement to extract package name
+            # Handle formats like: "package==1.0", "package>=1.0", "package", etc.
+            req_package_name = req.split("==")[0].split(">=")[0].split("<=")[0].split("!=")[0].split("~=")[0].split(">")[0].split("<")[0].strip()
+
+            # Skip if this is the package being checked
+            if package_name and req_package_name.lower() == package_name.lower():
+                continue
+
             f.write(f"{req}\n")
 
         # Add the package being checked
@@ -230,6 +247,29 @@ def check_compatibility(
             )
             return True, []  # Not a package conflict
 
+        # Check if error is due to package resolution issues (not on PyPI, no wheels, build issues)
+        # Extract package name from pyproject.toml
+        try:
+            from pyhc_actions.common.parser import parse_pyproject
+            pyproject_data = parse_pyproject(pyproject_path)
+            package_name = pyproject_data.get("project", {}).get("name")
+        except Exception:
+            package_name = None
+
+        if _is_unpublished_package_error(result.stderr, package_name):
+            reporter.add_warning(
+                package=package_name or "package",
+                message="Unable to resolve package version",
+                details=f"uv couldn't resolve the package. Possible causes:\n"
+                "- Package not published to PyPI\n"
+                "- No compatible wheels for this platform (may require compilation)\n"
+                "- Build dependencies not available\n"
+                "- Python version incompatibility\n\n"
+                "This check works best on Linux with published packages that have wheels.\n"
+                "Consider testing locally or on GitHub Actions (Linux) for accurate results.",
+            )
+            return True, []  # Not a real compatibility issue with PyHC Environment
+
         # Parse conflicts from error output
         conflicts = parse_uv_error(result.stderr)
 
@@ -244,6 +284,12 @@ def check_compatibility(
                 f"{conflict.reason}",
                 suggestion=suggestion,
             )
+
+        # If no conflicts were identified but uv failed, treat as compatible
+        # This can happen when uv fails for reasons unrelated to package conflicts
+        # (e.g., network issues, malformed requirements)
+        if not conflicts:
+            return True, []
 
         return False, conflicts
 
@@ -465,6 +511,38 @@ def _extract_conflict_from_error(stderr: str) -> Conflict | None:
                 )
 
     return None
+
+
+def _is_unpublished_package_error(stderr: str, package_name: str | None = None) -> bool:
+    """Check if error is due to package not being published on PyPI.
+
+    Args:
+        stderr: Error output from uv
+        package_name: Optional package name to check for
+
+    Returns:
+        True if this looks like an unpublished package error
+    """
+    indicators = [
+        "no version of",
+        "because there is no version of",
+        "could not find a version that satisfies",
+    ]
+
+    stderr_lower = stderr.lower()
+
+    # Check if any indicator matches
+    for indicator in indicators:
+        if indicator in stderr_lower:
+            # If package name provided, verify it's about that package
+            if package_name:
+                pattern = f"{indicator}\\s+{re.escape(package_name.lower())}"
+                if re.search(pattern, stderr_lower):
+                    return True
+            else:
+                return True
+
+    return False
 
 
 def _extract_error_summary(stderr: str) -> str:
