@@ -167,7 +167,7 @@ try:
 
     # Separate optional dependencies
     main_deps = []
-    optional_deps = {}
+    optional_deps = {{}}
     for req in reqs:
         if ';' in req and 'extra' in req:
             # Parse extra name

@@ -201,8 +201,8 @@ def check_compatibility(
 
             f.write(f"{req}\n")
 
-        # Add the package being checked
-        f.write(f"{package_path}\n")
+        # Add the package being checked (use -e for local editable install)
+        f.write(f"-e {package_path}\n")
 
         temp_requirements = f.name
 
@@ -218,7 +218,8 @@ def check_compatibility(
             ],
             capture_output=True,
             text=True,
-            cwd=pyproject_path.parent if pyproject_path.exists() else None,
+            # Handle both directory paths (setup.py) and file paths (pyproject.toml)
+            cwd=pyproject_path if pyproject_path.is_dir() else pyproject_path.parent,
             env={**os.environ, "UV_NO_CACHE": "1"},
         )
 
@@ -257,7 +258,7 @@ def check_compatibility(
             package_name = None
 
         if _is_unpublished_package_error(result.stderr, package_name):
-            reporter.add_warning(
+            reporter.add_error(
                 package=package_name or "package",
                 message="Unable to resolve package version",
                 details=f"uv couldn't resolve the package. Possible causes:\n"
@@ -268,7 +269,14 @@ def check_compatibility(
                 "This check works best on Linux with published packages that have wheels.\n"
                 "Consider testing locally or on GitHub Actions (Linux) for accurate results.",
             )
-            return True, []  # Not a real compatibility issue with PyHC Environment
+            return False, [
+                Conflict(
+                    package=package_name or "package",
+                    your_requirement="(unable to resolve)",
+                    pyhc_requirement="PyHC Environment",
+                    reason="Package resolution failed - see details above",
+                )
+            ]
 
         # Parse conflicts from error output
         conflicts = parse_uv_error(result.stderr)

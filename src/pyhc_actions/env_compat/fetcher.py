@@ -106,21 +106,26 @@ def load_pyhc_requirements(
 
 
 def get_package_from_pyproject(pyproject_path: Path | str) -> str:
-    """Get package specification from pyproject.toml for use in requirements.
+    """Get package directory path for use in requirements.
+
+    Handles both file paths (pyproject.toml) and directory paths (for setup.py
+    packages where main.py passes the project directory directly).
 
     Args:
-        pyproject_path: Path to pyproject.toml
+        pyproject_path: Path to pyproject.toml file OR project directory
 
     Returns:
-        Package specification string (either "." for local or package name)
+        Absolute path to the package directory
     """
     pyproject_path = Path(pyproject_path)
 
-    # If pyproject.toml exists in directory, use "." for editable install
-    if pyproject_path.exists():
-        return str(pyproject_path.parent.resolve())
+    # If it's a directory (setup.py packages), return that directory
+    if pyproject_path.is_dir():
+        return str(pyproject_path.resolve())
 
-    return "."
+    # If it's a file path (or expected to be one), return its parent directory
+    # This works whether the file exists or not
+    return str(pyproject_path.parent.resolve())
 
 
 def fetch_pyhc_environment_yml(url: str | None = None) -> str:
