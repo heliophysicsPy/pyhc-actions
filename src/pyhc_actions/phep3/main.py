@@ -87,8 +87,24 @@ Examples:
     # Check that project file exists
     project_path = Path(parsed_args.project_file)
     if not project_path.exists():
-        print(f"Error: File not found: {project_path}", file=sys.stderr)
-        return 1
+        # If pyproject.toml doesn't exist, try fallback to setup.py/setup.cfg
+        project_dir = project_path.parent if project_path.name == "pyproject.toml" else Path(".")
+        setup_py = project_dir / "setup.py"
+        setup_cfg = project_dir / "setup.cfg"
+
+        if not parsed_args.no_uv_fallback and (setup_py.exists() or setup_cfg.exists()):
+            # uv fallback enabled and legacy format exists
+            # Pass project directory to checker instead of pyproject.toml path
+            project_path = project_dir
+        else:
+            # No pyproject.toml and no fallback available
+            if parsed_args.no_uv_fallback:
+                print(f"Error: File not found: {project_path}", file=sys.stderr)
+                print(f"Hint: Enable uv fallback to support setup.py/setup.cfg", file=sys.stderr)
+            else:
+                print(f"Error: File not found: {project_path}", file=sys.stderr)
+                print(f"Hint: No setup.py or setup.cfg found for fallback", file=sys.stderr)
+            return 1
 
     # Find schedule file
     schedule_path = parsed_args.schedule
