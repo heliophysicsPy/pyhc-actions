@@ -132,6 +132,36 @@ pip install -e ".[dev]"
 pytest tests/ -v
 ```
 
+## Releases and Tagging
+
+This repository follows the standard GitHub Actions versioning pattern with major version tags:
+
+- **Specific version tags** (`v1.0.0`, `v1.0.1`, `v1.1.0`, etc.) - Immutable releases
+- **Major version tag** (`v1`) - Floating tag that points to the latest v1.x.x release
+
+### For Maintainers: Creating a New Release
+
+When releasing a new version:
+
+```bash
+# Create and push the specific version tag
+git tag v1.0.1
+git push origin v1.0.1
+
+# Update the major version tag to point to the new release
+git tag -f v1 v1.0.1
+git push -f origin v1
+
+# Create the GitHub release
+gh release create v1.0.1 --title "v1.0.1" --notes "Release notes here"
+```
+
+### Why Both Tags?
+
+- Users reference `@v1` in their workflows to automatically get the latest v1.x.x updates
+- The floating `v1` tag must be manually updated after each release
+- Specific version tags (`v1.0.0`) remain immutable for reproducibility
+
 ## Schedule Updates
 
 The `schedule.json` file contains release dates for Python and core Scientific Python packages. It's automatically updated monthly via GitHub Actions cron job.
