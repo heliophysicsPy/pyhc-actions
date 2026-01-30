@@ -297,13 +297,17 @@ def _is_python_version_error(stderr: str) -> tuple[bool, str | None]:
 def parse_uv_error(stderr: str) -> list[Conflict]:
     """Parse uv error output to extract conflict information.
 
-    uv outputs messages like:
-    "Because project requires numpy<2.0 and pyhc-environment requires numpy>=2.0,
-     we can conclude that project and pyhc-environment are incompatible."
+    uv outputs messages in various formats:
 
-    Or:
-    "error: No solution found when resolving dependencies:
-      ╰─▶ Because package-a==1.0.0 depends on numpy>=2.0 and package-b==1.0.0 depends on numpy<2.0..."
+    1. "Because project requires numpy<2.0 and pyhc-environment requires numpy>=2.0,
+        we can conclude that project and pyhc-environment are incompatible."
+
+    2. "Because package-a==1.0.0 depends on numpy>=2.0 and package-b==1.0.0
+        depends on numpy<2.0..."
+
+    3. "Because pyhc-core==0.0.7 depends on numpy<2 and you require numpy>=2.0,<2.3.0,
+        we can conclude that your requirements and pyhc-core[tests]==0.0.7 are
+        incompatible."
 
     Args:
         stderr: Standard error output from uv
@@ -314,60 +318,79 @@ def parse_uv_error(stderr: str) -> list[Conflict]:
     conflicts = []
     seen_packages = set()  # Track packages we've already reported to avoid duplicates
 
-    # Pattern 1: "X requires pkg-spec and Y requires pkg-spec" style
-    # This captures: "Because foo requires numpy<2.0 and bar requires numpy>=2.0"
+    # Helper to add a conflict if valid
+    def add_conflict(pkg1: str, spec1: str, pkg2: str, spec2: str, source1: str, source2: str) -> bool:
+        """Add conflict if packages match and specs differ. Returns True if added."""
+        if pkg1.lower() == pkg2.lower() and pkg1.lower() not in seen_packages:
+            if spec1 != spec2:
+                seen_packages.add(pkg1.lower())
+                # Determine which is "your" (package's) requirement vs PyHC Environment
+                # When uv says "X depends on" and "you require", the "you" refers to
+                # the combined requirements (which includes PyHC). So:
+                # - "depends on" side = user's package requirement
+                # - "you require" side = PyHC Environment requirement
+                if "you" in source2.lower():
+                    # Pattern: "X depends on pkg<spec and you require pkg>=spec"
+                    your_req, pyhc_req = f"{pkg1}{spec1}", f"{pkg2}{spec2}"
+                elif "you" in source1.lower():
+                    # Pattern: "you require pkg<spec and X depends on pkg>=spec"
+                    your_req, pyhc_req = f"{pkg2}{spec2}", f"{pkg1}{spec1}"
+                else:
+                    # Default: first is user's, second is environment's
+                    your_req, pyhc_req = f"{pkg1}{spec1}", f"{pkg2}{spec2}"
+                conflicts.append(
+                    Conflict(
+                        package=pkg1,
+                        your_requirement=your_req,
+                        pyhc_requirement=pyhc_req,
+                        reason=f"Incompatible version requirements",
+                    )
+                )
+                return True
+        return False
+
+    # Version spec pattern: handles <, >, =, !, ~ (for ~= compatible release)
+    # Examples: >=1.0, <2.0, ==1.5, !=1.3, ~=1.20, >=1.0,<2.0
+    VERSION_SPEC = r"[<>=!~][^\s]+?"
+
+    # Pattern 1: "Because X requires pkg-spec and Y requires pkg-spec" style
     pattern1 = re.compile(
-        r"Because\s+(\S+)\s+requires\s+([a-zA-Z0-9_-]+)([<>=!][^\s,]+)\s+and\s+(\S+)\s+requires\s+([a-zA-Z0-9_-]+)([<>=!][^\s,]+)",
+        rf"Because\s+(\S+)\s+requires\s+([a-zA-Z0-9_-]+)({VERSION_SPEC}),?\s+and\s+(\S+)\s+requires\s+([a-zA-Z0-9_-]+)({VERSION_SPEC}),?\s",
         re.IGNORECASE,
     )
 
     # Pattern 2: "X depends on pkg-spec and Y depends on pkg-spec" style
     pattern2 = re.compile(
-        r"(\S+)\s+depends\s+on\s+([a-zA-Z0-9_-]+)([<>=!][^\s,]+)\s+and\s+(\S+)\s+depends\s+on\s+([a-zA-Z0-9_-]+)([<>=!][^\s,]+)",
+        rf"(\S+)\s+depends\s+on\s+([a-zA-Z0-9_-]+)({VERSION_SPEC}),?\s+and\s+(\S+)\s+depends\s+on\s+([a-zA-Z0-9_-]+)({VERSION_SPEC}),?\s",
         re.IGNORECASE,
     )
 
-    # Try pattern 1
-    for match in pattern1.finditer(stderr):
-        source1, pkg1, spec1, source2, pkg2, spec2 = match.groups()
-
-        # Only report if it's the same package with different specs
-        if pkg1.lower() == pkg2.lower() and pkg1.lower() not in seen_packages:
-            # Check specs are actually different (not identical)
-            if spec1 != spec2:
-                seen_packages.add(pkg1.lower())
-                conflicts.append(
-                    Conflict(
-                        package=pkg1,
-                        your_requirement=f"{pkg1}{spec1}",
-                        pyhc_requirement=f"{pkg2}{spec2}",
-                        reason=f"Incompatible requirements from {source1} and {source2}",
-                    )
-                )
-
-    # Try pattern 2
-    for match in pattern2.finditer(stderr):
-        source1, pkg1, spec1, source2, pkg2, spec2 = match.groups()
-
-        if pkg1.lower() == pkg2.lower() and pkg1.lower() not in seen_packages:
-            if spec1 != spec2:
-                seen_packages.add(pkg1.lower())
-                conflicts.append(
-                    Conflict(
-                        package=pkg1,
-                        your_requirement=f"{pkg1}{spec1}",
-                        pyhc_requirement=f"{pkg2}{spec2}",
-                        reason=f"Incompatible requirements from {source1} and {source2}",
-                    )
-                )
-
-    # Pattern 3: Look for explicit "X and Y are incompatible" with package names
+    # Pattern 3: "X depends on pkg-spec and you require pkg-spec" style
+    # This is the actual format uv uses when checking a local package against requirements
     pattern3 = re.compile(
-        r"([a-zA-Z0-9_-]+)([<>=!]+[0-9][0-9.]*)\s+.*?\s+([a-zA-Z0-9_-]+)([<>=!]+[0-9][0-9.]*)\s+are\s+incompatible",
+        rf"(\S+)\s+depends\s+on\s+([a-zA-Z0-9_-]+)({VERSION_SPEC}),?\s+and\s+(you)\s+require\s+([a-zA-Z0-9_-]+)({VERSION_SPEC}),?\s",
         re.IGNORECASE,
     )
 
-    for match in pattern3.finditer(stderr):
+    # Pattern 4: Reverse of pattern 3 - "you require pkg-spec and X depends on pkg-spec"
+    pattern4 = re.compile(
+        rf"(you)\s+require\s+([a-zA-Z0-9_-]+)({VERSION_SPEC}),?\s+and\s+(\S+)\s+depends\s+on\s+([a-zA-Z0-9_-]+)({VERSION_SPEC}),?\s",
+        re.IGNORECASE,
+    )
+
+    # Try all patterns
+    for pattern in [pattern1, pattern2, pattern3, pattern4]:
+        for match in pattern.finditer(stderr):
+            source1, pkg1, spec1, source2, pkg2, spec2 = match.groups()
+            add_conflict(pkg1, spec1, pkg2, spec2, source1, source2)
+
+    # Pattern 5: Look for explicit "X and Y are incompatible" with package names
+    pattern5 = re.compile(
+        r"([a-zA-Z0-9_-]+)([<>=!~]+[0-9][0-9.]*)\s+.*?\s+([a-zA-Z0-9_-]+)([<>=!~]+[0-9][0-9.]*)\s+are\s+incompatible",
+        re.IGNORECASE,
+    )
+
+    for match in pattern5.finditer(stderr):
         pkg1, spec1, pkg2, spec2 = match.groups()
         if pkg1.lower() == pkg2.lower() and pkg1.lower() not in seen_packages:
             if spec1 != spec2:
@@ -381,32 +404,85 @@ def parse_uv_error(stderr: str) -> list[Conflict]:
                     )
                 )
 
-    # If still no conflicts found, create a generic one from the error message
+    # If still no conflicts found, try to extract package info from the error
     if not conflicts and "No solution found" in stderr:
-        conflicts.append(
-            Conflict(
-                package="dependencies",
-                your_requirement="(see error details)",
-                pyhc_requirement="PyHC Environment",
-                reason=_extract_error_summary(stderr),
+        # Try to find any package with conflicting versions mentioned
+        conflict = _extract_conflict_from_error(stderr)
+        if conflict:
+            conflicts.append(conflict)
+        else:
+            # Last resort: generic error with full details
+            conflicts.append(
+                Conflict(
+                    package="dependencies",
+                    your_requirement="(see details below)",
+                    pyhc_requirement="PyHC Environment",
+                    reason=_extract_error_summary(stderr),
+                )
             )
-        )
 
     return conflicts
 
 
+def _extract_conflict_from_error(stderr: str) -> Conflict | None:
+    """Try to extract conflict info from error message when patterns don't match.
+
+    This is a fallback that looks for package names and version specs mentioned
+    in the error, even if they don't match our expected patterns.
+    """
+    # Look for patterns like "depends on numpy<2" or "requires numpy>=2.0"
+    # Note: [<>=!~]+ handles multi-char operators like >=, <=, !=, ==, ~=
+    pkg_version_pattern = re.compile(
+        r"(?:depends\s+on|requires?)\s+([a-zA-Z0-9_-]+)([<>=!~]+[0-9][^\s,]*)",
+        re.IGNORECASE,
+    )
+
+    matches = pkg_version_pattern.findall(stderr)
+    if len(matches) >= 2:
+        # Group by package name
+        by_package: dict[str, list[str]] = {}
+        for pkg, spec in matches:
+            pkg_lower = pkg.lower()
+            if pkg_lower not in by_package:
+                by_package[pkg_lower] = []
+            full_spec = f"{pkg}{spec}"
+            if full_spec not in by_package[pkg_lower]:
+                by_package[pkg_lower].append(full_spec)
+
+        # Find a package with multiple different specs (conflict)
+        for pkg_lower, specs in by_package.items():
+            if len(specs) >= 2:
+                # Extract package name from the first spec (e.g., "requests" from "requests<2.0")
+                pkg_name = re.split(r"[<>=!]", specs[0])[0]
+                return Conflict(
+                    package=pkg_name,
+                    your_requirement=specs[0],
+                    pyhc_requirement=specs[1],
+                    reason="Conflicting version requirements detected",
+                )
+
+    return None
+
+
 def _extract_error_summary(stderr: str) -> str:
-    """Extract a summary from uv error output."""
-    # Get first few lines of error
+    """Extract the main error content from uv output.
+
+    Returns the error message without hints, formatted for display.
+    """
     lines = stderr.strip().split("\n")
     summary_lines = []
 
-    for line in lines[:5]:
+    for line in lines:
         line = line.strip()
-        if line and not line.startswith("hint:"):
-            summary_lines.append(line)
+        # Skip empty lines and hints
+        if not line or line.lower().startswith("hint:"):
+            continue
+        # Clean up uv's tree characters
+        line = line.replace("╰─▶", "→").replace("│", " ").replace("├", " ")
+        summary_lines.append(line)
 
-    return " ".join(summary_lines)
+    # Return full error, not truncated
+    return "\n".join(summary_lines)
 
 
 def run_uv_lock_check(
