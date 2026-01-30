@@ -188,14 +188,14 @@ try:
         else:
             main_deps.append(req)
 
-    print(json.dumps({
+    print(json.dumps({{
         "name": meta.get("Name", pkg_name),
         "requires_python": meta.get("Requires-Python"),
         "dependencies": main_deps,
         "optional_dependencies": optional_deps,
-    }))
+    }}))
 except Exception as e:
-    print(json.dumps({"error": str(e)}))
+    print(json.dumps({{"error": str(e)}}))
     sys.exit(1)
 """
 

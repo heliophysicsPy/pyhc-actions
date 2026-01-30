@@ -67,8 +67,19 @@ Examples:
     # Check that project file exists
     project_path = Path(parsed_args.project_file)
     if not project_path.exists():
-        print(f"Error: File not found: {project_path}", file=sys.stderr)
-        return 1
+        # If pyproject.toml doesn't exist, check for setup.py/setup.cfg
+        # The checker can extract metadata from these using the project directory
+        project_dir = project_path.parent if project_path.name == "pyproject.toml" else Path(".")
+        setup_py = project_dir / "setup.py"
+        setup_cfg = project_dir / "setup.cfg"
+
+        if setup_py.exists() or setup_cfg.exists():
+            # Pass project directory instead of pyproject.toml path
+            project_path = project_dir
+        else:
+            print(f"Error: File not found: {project_path}", file=sys.stderr)
+            print(f"Hint: No setup.py or setup.cfg found for fallback", file=sys.stderr)
+            return 1
 
     # Create reporter
     reporter = Reporter(title="PyHC Environment Compatibility Check")
