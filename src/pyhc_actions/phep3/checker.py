@@ -184,6 +184,7 @@ def _check_python_version(
             package="python",
             message=f"Python {version_str} support can be dropped per PHEP 3",
             details=details,
+            suggestion=f"Minimum required version: {min_required}" if min_required else None,
         )
     elif not version_info and min_required:
         # Version not in schedule - check if it's older than minimum
@@ -194,6 +195,7 @@ def _check_python_version(
                 package="python",
                 message=f"Python {version_str} support can be dropped per PHEP 3",
                 details=f"Python {version_str} is older than the minimum required version ({min_required})",
+                suggestion=f"Minimum required version: {min_required}",
             )
 
     # Check upper bound - ERROR if it excludes a Python version that must_be_supported(now)
@@ -368,6 +370,7 @@ def _check_lower_bound(
             package=dep.name,
             message=f"{dep.name} {version_str} support can be dropped per PHEP 3",
             details=details,
+            suggestion=f"Minimum required version: {dep.name}>={min_supported}" if min_supported else None,
         )
     elif not version_info and min_supported:
         # Version not in schedule - check if it's older than minimum
@@ -377,6 +380,7 @@ def _check_lower_bound(
                 package=dep.name,
                 message=f"{dep.name} {version_str} support can be dropped per PHEP 3",
                 details=f"Version {version_str} is older than the minimum required version ({dep.name}>={min_supported})",
+                suggestion=f"Minimum required version: {dep.name}>={min_supported}",
             )
 
 
