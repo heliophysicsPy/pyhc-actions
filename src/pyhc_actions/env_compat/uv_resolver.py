@@ -22,6 +22,30 @@ from pyhc_actions.env_compat.fetcher import (
 )
 
 
+def parse_resolved_versions(uv_output: str) -> dict[str, str]:
+    """Parse resolved package versions from uv pip compile output.
+
+    Args:
+        uv_output: The stdout from 'uv pip compile' command
+
+    Returns:
+        Dict mapping package name to resolved version/range
+    """
+    resolved = {}
+    for line in uv_output.split('\n'):
+        line = line.strip()
+        # Skip comments and empty lines
+        if not line or line.startswith('#'):
+            continue
+        # Parse package specs (e.g., "numpy==2.1.3" or "scipy>=1.13.0,<2.0")
+        # Package names can contain letters, numbers, hyphens, underscores, and dots
+        match = re.match(r'^([a-zA-Z0-9_.-]+)([<>=!~].*?)$', line)
+        if match:
+            pkg_name, version_spec = match.groups()
+            resolved[pkg_name] = f"{pkg_name}{version_spec}"
+    return resolved
+
+
 @dataclass
 class Conflict:
     """Represents a dependency conflict."""
@@ -226,7 +250,6 @@ def check_compatibility(
                 "pip",
                 "compile",
                 temp_requirements,
-                "--quiet",
             ],
             capture_output=True,
             text=True,
@@ -236,6 +259,16 @@ def check_compatibility(
         )
 
         if result.returncode == 0:
+            # Parse and display resolved package versions
+            resolved = parse_resolved_versions(result.stdout)
+
+            if resolved:
+                reporter.print("\nResolved Package Versions:")
+                reporter.print("-" * 40)
+                for package in sorted(resolved.keys()):
+                    reporter.print(f"  {resolved[package]}")
+                reporter.print()
+
             return True, []
 
         # Check if error is platform-specific (not a real conflict)
