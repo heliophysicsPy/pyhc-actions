@@ -158,9 +158,10 @@ try:
         print(json.dumps({{"error": "No new package found after install"}}))
         sys.exit(1)
 
-    # Get package name from the new dist-info
+    # Get package name from the new dist-info (format: NAME-VERSION.dist-info)
     new_dist = list(new_dists)[0]
-    pkg_name = new_dist.rsplit('-', 1)[0].replace('_', '-')
+    name_version = new_dist.replace('.dist-info', '')
+    pkg_name = name_version.rsplit('-', 1)[0].replace('_', '-')
 
     meta = metadata(pkg_name)
     reqs = requires(pkg_name) or []
@@ -172,7 +173,7 @@ try:
         if ';' in req and 'extra' in req:
             # Parse extra name
             import re
-            match = re.search(r"extra\\s*==\\s*['\"]([^'\"]+)['\"]", req)
+            match = re.search(r'extra\\s*==\\s*[' + "'" + r'"]([^' + "'" + r'"]+)[' + "'" + r'"]', req)
             if match:
                 extra_name = match.group(1)
                 # Remove the marker

@@ -178,12 +178,24 @@ def check_compatibility(
 
     # Get package name to filter from PyHC requirements
     # (avoid conflict with package checking itself)
+    package_name = None
     try:
         from pyhc_actions.common.parser import parse_pyproject
         pyproject_data = parse_pyproject(pyproject_path)
         package_name = pyproject_data.get("project", {}).get("name")
     except Exception:
-        package_name = None
+        pass
+
+    # For setup.py packages, try extracting name using uv
+    if not package_name:
+        try:
+            from pyhc_actions.phep3.metadata_extractor import extract_metadata_with_uv
+            project_dir = pyproject_path if pyproject_path.is_dir() else pyproject_path.parent
+            metadata = extract_metadata_with_uv(project_dir)
+            if metadata:
+                package_name = metadata.name
+        except Exception:
+            pass
 
     # Create temporary requirements file combining both
     with tempfile.NamedTemporaryFile(
