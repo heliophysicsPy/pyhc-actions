@@ -37,12 +37,19 @@ def parse_resolved_versions(uv_output: str) -> dict[str, str]:
         # Skip comments and empty lines
         if not line or line.startswith('#'):
             continue
-        # Parse package specs (e.g., "numpy==2.1.3" or "scipy>=1.13.0,<2.0")
+        # Parse package specs:
+        # - Version specs: "numpy==2.1.3" or "scipy>=1.13.0,<2.0"
+        # - Editable/local installs: "pyspedas @ file:///path/to/package"
+        # - Git installs: "package @ git+https://..."
         # Package names can contain letters, numbers, hyphens, underscores, and dots
-        match = re.match(r'^([a-zA-Z0-9_.-]+)([<>=!~].*?)$', line)
+        match = re.match(r'^([a-zA-Z0-9_.-]+)\s*(@\s+.+|[<>=!~].*)$', line)
         if match:
-            pkg_name, version_spec = match.groups()
-            resolved[pkg_name] = f"{pkg_name}{version_spec}"
+            pkg_name, spec = match.groups()
+            # Add space before @ for proper formatting
+            if spec.startswith('@'):
+                resolved[pkg_name] = f"{pkg_name} {spec}"
+            else:
+                resolved[pkg_name] = f"{pkg_name}{spec}"
     return resolved
 
 
