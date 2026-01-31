@@ -269,6 +269,10 @@ def check_compatibility(
             # Parse and display resolved package versions
             resolved = parse_resolved_versions(result.stdout)
 
+            # Add the package being checked (uv doesn't output editable installs)
+            if package_name:
+                resolved[package_name.lower()] = f"{package_name} @ {package_path}"
+
             if resolved:
                 reporter.print("\nResolved Package Versions:")
                 reporter.print("-" * 40)
