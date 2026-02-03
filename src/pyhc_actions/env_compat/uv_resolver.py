@@ -353,7 +353,21 @@ def check_compatibility(
         # This can happen when uv fails for reasons unrelated to package conflicts
         # (e.g., network issues, malformed requirements)
         if not conflicts:
-            return True, []
+            # uv failed but we couldn't parse conflicts; fail loudly to avoid false positives.
+            stderr_text = result.stderr.strip() or "(uv stderr was empty)"
+            stdout_text = result.stdout.strip() or "(uv stdout was empty)"
+            reporter.add_error(
+                package="uv",
+                message="uv resolution failed with no parsed conflicts",
+                details=(
+                    f"Exit code: {result.returncode}\n"
+                    "STDERR:\n"
+                    f"{stderr_text}\n"
+                    "STDOUT:\n"
+                    f"{stdout_text}"
+                ),
+            )
+            return False, []
 
         return False, conflicts
 
