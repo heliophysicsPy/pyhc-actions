@@ -13,6 +13,10 @@ Validates package requirements against [PHEP 3](https://doi.org/10.5281/zenodo.1
 - New versions adopted within **6 months** of release
 - Warnings on max/exact constraints (e.g., `numpy<2`, `scipy==1.10`)
 
+**Notes**
+Metadata extraction reads PEP 621 `[project]` by default and can fall back to `uv` for legacy formats (`setup.py`, `setup.cfg`, Poetry).
+Dependencies with `python_version` or `python_full_version` markers only trigger lower-bound **warnings** when the marker applies to some (not all) supported Python versions.
+
 #### Usage
 
 ```yaml
@@ -34,6 +38,15 @@ jobs:
 | `fail-on-warning` | Treat warnings as errors | `false` |
 | `check-adoption` | Check 6-month adoption rule | `true` |
 | `schedule-path` | Path to schedule.json | (auto-download) |
+| `use-uv-fallback` | Use uv for metadata extraction from legacy formats | `true` |
+
+#### Outputs
+
+| Output | Description |
+|--------|-------------|
+| `passed` | Whether the check passed |
+| `errors` | Number of errors found (not populated yet) |
+| `warnings` | Number of warnings found (not populated yet) |
 
 #### Example Output
 
@@ -42,17 +55,18 @@ PHEP 3 Compliance Check
 ========================
 
 ERRORS:
-[ERROR] requires-python = ">=3.9" violates PHEP 3
-        Python 3.9 released Oct 2020 (>36 months ago)
-        Suggested: >=3.11
+[ERROR] requires-python = ">=3.9" drops support for Python 3.11 too early
+        Python 3.11 must still be supported per PHEP 3
+        Suggested: Change to requires-python = ">=3.11"
 
-[ERROR] numpy>=1.19 violates PHEP 3
-        Version 1.19 released Jun 2020 (>24 months ago)
-        Suggested: numpy>=1.26
+[ERROR] numpy>=1.19 drops support for numpy 1.26 too early
+        numpy 1.26 must still be supported per PHEP 3
+        Suggested: Change to numpy>=1.26
 
 WARNINGS:
 [WARN] scipy<1.14 has upper bound constraint
-       Consider removing unless absolutely necessary
+        Upper bounds should only be used when absolutely necessary
+        Suggested: Consider removing <1.14 unless required
 
 Summary: 2 error(s), 1 warning(s)
 Status: FAILED
@@ -63,6 +77,9 @@ Status: FAILED
 Detects dependency conflicts with the [PyHC Environment](https://github.com/heliophysicsPy/pyhc-docker-environment).
 
 Uses **[uv](https://github.com/astral-sh/uv)** for fast, accurate dependency resolution that catches transitive conflicts.
+The check also compares your `requires-python` to the PyHC Environment's Python version (from `environment.yml`) before running uv.
+Some uv failures are treated as warnings and pass (for example platform-specific packages or a local Python version mismatch).
+Legacy formats (`setup.py`, `setup.cfg`) are supported by passing the project directory.
 
 #### Usage
 
@@ -84,6 +101,13 @@ jobs:
 | `project-file` | Path to pyproject.toml | `pyproject.toml` |
 | `pyhc-requirements-url` | URL to PyHC requirements.txt | (official GitHub URL) |
 
+#### Outputs
+
+| Output | Description |
+|--------|-------------|
+| `compatible` | Whether the package is compatible |
+| `conflicts` | Number of conflicts found (only set on success) |
+
 #### Example Output
 
 ```
@@ -91,10 +115,11 @@ PyHC Environment Compatibility Check
 =====================================
 
 ERRORS:
-[ERROR] Dependency conflict with PyHC Environment
-        Your package: numpy<2.0
+[ERROR] Dependency conflict: numpy
+        Your requirement: numpy<2.0
         PyHC Environment: numpy>=2.0,<2.3.0
-        No overlapping versions
+        Incompatible version requirements
+        Suggested: Support numpy>=2.0,<2.3.0
 
 Summary: 1 error(s), 0 warning(s)
 Status: FAILED
@@ -111,8 +136,20 @@ pip install -e .
 # Run PHEP 3 check
 phep3-check pyproject.toml
 
+# Run PHEP 3 check with legacy format (setup.py/setup.cfg/Poetry) via uv fallback
+phep3-check path/to/project
+
+# Disable uv fallback
+phep3-check --no-uv-fallback pyproject.toml
+
 # Run PyHC Environment compatibility check (requires uv)
 pyhc-env-compat-check pyproject.toml
+
+# Use a local requirements.txt or alternate URL
+pyhc-env-compat-check --requirements ./requirements.txt pyproject.toml
+
+# Only check that uv is installed
+pyhc-env-compat-check --check-uv
 
 # Generate fresh schedule.json
 phep3-check --generate-schedule
