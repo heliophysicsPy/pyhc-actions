@@ -62,9 +62,9 @@ runs:
         # Ensure git history/tags are available for setuptools_scm versioning
         if [ -d .git ]; then
           if git rev-parse --is-shallow-repository >/dev/null 2>&1; then
-            git fetch --unshallow --tags --force --prune
+            git fetch --quiet --unshallow --tags --force --prune
           else
-            git fetch --tags --force --prune
+            git fetch --quiet --tags --force --prune
           fi
         fi
 
