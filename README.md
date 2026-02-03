@@ -13,10 +13,6 @@ Validates package requirements against [PHEP 3](https://doi.org/10.5281/zenodo.1
 - New versions adopted within **6 months** of release
 - Warnings on max/exact constraints (e.g., `numpy<2`, `scipy==1.10`)
 
-**Notes**
-Metadata extraction reads PEP 621 `[project]` by default and can fall back to `uv` for legacy formats (`setup.py`, `setup.cfg`, Poetry).
-Dependencies with `python_version` or `python_full_version` markers only trigger lower-bound **warnings** when the marker applies to some (not all) supported Python versions.
-
 #### Usage
 
 ```yaml
@@ -64,15 +60,11 @@ ERRORS:
         Suggested: Update upper bound to include 2.0
 
 WARNINGS:
-[WARN] numpy>=2.3; python_version == "3.14" drops support for numpy 2.0 too early
-        numpy 2.0 should still be supported per PHEP 3
-        Suggested: Drops PHEP 3 min (2.0); marker allows min for some supported Pythons
-
 [WARN] scipy<1.14 has upper bound constraint
         Upper bounds should only be used when absolutely necessary
         Suggested: Consider removing <1.14 unless required
 
-Summary: 2 error(s), 2 warning(s)
+Summary: 2 error(s), 1 warning(s)
 Status: FAILED
 ```
 
@@ -81,9 +73,6 @@ Status: FAILED
 Detects dependency conflicts with the [PyHC Environment](https://github.com/heliophysicsPy/pyhc-docker-environment).
 
 Uses **[uv](https://github.com/astral-sh/uv)** for fast, accurate dependency resolution that catches transitive conflicts.
-The check also compares your `requires-python` to the PyHC Environment's Python version (from `environment.yml`) before running uv.
-Some uv failures are treated as warnings and pass (for example platform-specific packages or a local Python version mismatch).
-Legacy formats (`setup.py`, `setup.cfg`) are supported by passing the project directory.
 
 #### Usage
 
@@ -238,6 +227,6 @@ Contributions welcome! Please open issues or pull requests on GitHub.
 
 ## Related
 
-- [PHEP 3](https://doi.org/10.5281/zenodo.17794207) - PyHC Python & Upstream Package Support Policy
+- [PHEP 3](https://github.com/heliophysicsPy/standards/blob/main/pheps/phep-0003.md) - PyHC Python & Upstream Package Support Policy
 - [SPEC 0](https://scientific-python.org/specs/spec-0000/) - Scientific Python Minimum Supported Versions
 - [PyHC Environment](https://github.com/heliophysicsPy/pyhc-docker-environment) - Docker environment with all PyHC packages
