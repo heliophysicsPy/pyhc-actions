@@ -476,32 +476,36 @@ def parse_uv_error(stderr: str) -> list[Conflict]:
                 return True
         return False
 
+    # Package + version patterns
+    # Package names can include hyphens/underscores; extras like [image] are supported.
+    PKG_NAME = r"[a-zA-Z0-9_-]+"
+    EXTRAS = r"(?:\[[^\]]+\])?"
     # Version spec pattern: handles <, >, =, !, ~ (for ~= compatible release)
     # Examples: >=1.0, <2.0, ==1.5, !=1.3, ~=1.20, >=1.0,<2.0
     VERSION_SPEC = r"[<>=!~][^\s]+?"
 
     # Pattern 1: "Because X requires pkg-spec and Y requires pkg-spec" style
     pattern1 = re.compile(
-        rf"Because\s+(\S+)\s+requires\s+([a-zA-Z0-9_-]+)({VERSION_SPEC}),?\s+and\s+(\S+)\s+requires\s+([a-zA-Z0-9_-]+)({VERSION_SPEC}),?\s",
+        rf"Because\s+(\S+)\s+requires\s+({PKG_NAME})({EXTRAS}{VERSION_SPEC}),?\s+and\s+(\S+)\s+requires\s+({PKG_NAME})({EXTRAS}{VERSION_SPEC}),?\s",
         re.IGNORECASE,
     )
 
     # Pattern 2: "X depends on pkg-spec and Y depends on pkg-spec" style
     pattern2 = re.compile(
-        rf"(\S+)\s+depends\s+on\s+([a-zA-Z0-9_-]+)({VERSION_SPEC}),?\s+and\s+(\S+)\s+depends\s+on\s+([a-zA-Z0-9_-]+)({VERSION_SPEC}),?\s",
+        rf"(\S+)\s+depends\s+on\s+({PKG_NAME})({EXTRAS}{VERSION_SPEC}),?\s+and\s+(\S+)\s+depends\s+on\s+({PKG_NAME})({EXTRAS}{VERSION_SPEC}),?\s",
         re.IGNORECASE,
     )
 
     # Pattern 3: "X depends on pkg-spec and you require pkg-spec" style
     # This is the actual format uv uses when checking a local package against requirements
     pattern3 = re.compile(
-        rf"(\S+)\s+depends\s+on\s+([a-zA-Z0-9_-]+)({VERSION_SPEC}),?\s+and\s+(you)\s+require\s+([a-zA-Z0-9_-]+)({VERSION_SPEC}),?\s",
+        rf"(\S+)\s+depends\s+on\s+({PKG_NAME})({EXTRAS}{VERSION_SPEC}),?\s+and\s+(you)\s+require\s+({PKG_NAME})({EXTRAS}{VERSION_SPEC}),?\s",
         re.IGNORECASE,
     )
 
     # Pattern 4: Reverse of pattern 3 - "you require pkg-spec and X depends on pkg-spec"
     pattern4 = re.compile(
-        rf"(you)\s+require\s+([a-zA-Z0-9_-]+)({VERSION_SPEC}),?\s+and\s+(\S+)\s+depends\s+on\s+([a-zA-Z0-9_-]+)({VERSION_SPEC}),?\s",
+        rf"(you)\s+require\s+({PKG_NAME})({EXTRAS}{VERSION_SPEC}),?\s+and\s+(\S+)\s+depends\s+on\s+({PKG_NAME})({EXTRAS}{VERSION_SPEC}),?\s",
         re.IGNORECASE,
     )
 
@@ -511,9 +515,47 @@ def parse_uv_error(stderr: str) -> list[Conflict]:
             source1, pkg1, spec1, source2, pkg2, spec2 = match.groups()
             add_conflict(pkg1, spec1, pkg2, spec2, source1, source2)
 
+    # Pattern 5: "only X<Y is available and Z depends on X[extra]>=Y"
+    pattern_available_depends = re.compile(
+        rf"only\s+({PKG_NAME})({EXTRAS}{VERSION_SPEC})\s+is\s+available\s+and\s+(\S+)\s+depends\s+on\s+({PKG_NAME})({EXTRAS}{VERSION_SPEC})",
+        re.IGNORECASE,
+    )
+    for match in pattern_available_depends.finditer(stderr):
+        avail_pkg, avail_spec, source, req_pkg, req_spec = match.groups()
+        # Order so the dependency requirement is treated as "your" requirement
+        add_conflict(req_pkg, req_spec, avail_pkg, avail_spec, source, "available")
+
+    # Pattern 6: "only X<Y is available and you require X>=Y"
+    pattern_available_you = re.compile(
+        rf"only\s+({PKG_NAME})({EXTRAS}{VERSION_SPEC})\s+is\s+available\s+and\s+(you)\s+require\s+({PKG_NAME})({EXTRAS}{VERSION_SPEC})",
+        re.IGNORECASE,
+    )
+    for match in pattern_available_you.finditer(stderr):
+        avail_pkg, avail_spec, you_token, req_pkg, req_spec = match.groups()
+        # Ensure the "you" token is used to map your requirement to req_spec
+        add_conflict(req_pkg, req_spec, avail_pkg, avail_spec, "available", you_token)
+
+    # Pattern 7: "there is no version of X==Y and you require X==Y"
+    pattern_no_version = re.compile(
+        rf"no\s+version\s+of\s+({PKG_NAME})({EXTRAS}{VERSION_SPEC})\s+and\s+you\s+require\s+({PKG_NAME})({EXTRAS}{VERSION_SPEC})",
+        re.IGNORECASE,
+    )
+    for match in pattern_no_version.finditer(stderr):
+        pkg1, spec1, pkg2, spec2 = match.groups()
+        if pkg1.lower() == pkg2.lower() and pkg1.lower() not in seen_packages:
+            seen_packages.add(pkg1.lower())
+            conflicts.append(
+                Conflict(
+                    package=pkg1,
+                    your_requirement=f"{pkg1}{spec1}",
+                    pyhc_requirement="(no matching distribution)",
+                    reason="No matching distribution found",
+                )
+            )
+
     # Pattern 5: Look for explicit "X and Y are incompatible" with package names
     pattern5 = re.compile(
-        r"([a-zA-Z0-9_-]+)([<>=!~]+[0-9][0-9.]*)\s+.*?\s+([a-zA-Z0-9_-]+)([<>=!~]+[0-9][0-9.]*)\s+are\s+incompatible",
+        rf"({PKG_NAME})({EXTRAS}[<>=!~]+[0-9][0-9.]*)\s+.*?\s+({PKG_NAME})({EXTRAS}[<>=!~]+[0-9][0-9.]*)\s+are\s+incompatible",
         re.IGNORECASE,
     )
 
@@ -560,7 +602,7 @@ def _extract_conflict_from_error(stderr: str) -> Conflict | None:
     # Look for patterns like "depends on numpy<2" or "requires numpy>=2.0"
     # Note: [<>=!~]+ handles multi-char operators like >=, <=, !=, ==, ~=
     pkg_version_pattern = re.compile(
-        r"(?:depends\s+on|requires?)\s+([a-zA-Z0-9_-]+)([<>=!~]+[0-9][^\s,]*)",
+        r"(?:depends\s+on|requires?)\s+([a-zA-Z0-9_-]+)(\[[^\]]+\])?([<>=!~]+[0-9][^\s,]*)",
         re.IGNORECASE,
     )
 
@@ -568,11 +610,12 @@ def _extract_conflict_from_error(stderr: str) -> Conflict | None:
     if len(matches) >= 2:
         # Group by package name
         by_package: dict[str, list[str]] = {}
-        for pkg, spec in matches:
+        for pkg, extras, spec in matches:
+            extras = extras or ""
+            full_spec = f"{pkg}{extras}{spec}"
             pkg_lower = pkg.lower()
             if pkg_lower not in by_package:
                 by_package[pkg_lower] = []
-            full_spec = f"{pkg}{spec}"
             if full_spec not in by_package[pkg_lower]:
                 by_package[pkg_lower].append(full_spec)
 
