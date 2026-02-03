@@ -446,10 +446,20 @@ def parse_uv_error(stderr: str) -> list[Conflict]:
     seen_packages = set()  # Track packages we've already reported to avoid duplicates
 
     # Helper to add a conflict if valid
+    def _strip_extras(spec: str) -> str:
+        """Normalize specifier by removing leading extras (e.g., [image])."""
+        if spec.startswith("["):
+            end = spec.find("]")
+            if end != -1:
+                return spec[end + 1 :]
+        return spec
+
     def add_conflict(pkg1: str, spec1: str, pkg2: str, spec2: str, source1: str, source2: str) -> bool:
         """Add conflict if packages match and specs differ. Returns True if added."""
         if pkg1.lower() == pkg2.lower() and pkg1.lower() not in seen_packages:
-            if spec1 != spec2:
+            spec1_norm = _strip_extras(spec1)
+            spec2_norm = _strip_extras(spec2)
+            if spec1_norm != spec2_norm:
                 seen_packages.add(pkg1.lower())
                 # Determine which is "your" (package's) requirement vs PyHC Environment
                 # When uv says "X depends on" and "you require", the "you" refers to
@@ -562,7 +572,7 @@ def parse_uv_error(stderr: str) -> list[Conflict]:
     for match in pattern5.finditer(stderr):
         pkg1, spec1, pkg2, spec2 = match.groups()
         if pkg1.lower() == pkg2.lower() and pkg1.lower() not in seen_packages:
-            if spec1 != spec2:
+            if _strip_extras(spec1) != _strip_extras(spec2):
                 seen_packages.add(pkg1.lower())
                 conflicts.append(
                     Conflict(
@@ -606,22 +616,32 @@ def _extract_conflict_from_error(stderr: str) -> Conflict | None:
         re.IGNORECASE,
     )
 
+    def _strip_extras_from_spec(spec: str) -> str:
+        if spec.startswith("["):
+            end = spec.find("]")
+            if end != -1:
+                return spec[end + 1 :]
+        return spec
+
     matches = pkg_version_pattern.findall(stderr)
     if len(matches) >= 2:
         # Group by package name
         by_package: dict[str, list[str]] = {}
+        by_package_norm: dict[str, set[str]] = {}
         for pkg, extras, spec in matches:
             extras = extras or ""
             full_spec = f"{pkg}{extras}{spec}"
             pkg_lower = pkg.lower()
             if pkg_lower not in by_package:
                 by_package[pkg_lower] = []
+                by_package_norm[pkg_lower] = set()
             if full_spec not in by_package[pkg_lower]:
                 by_package[pkg_lower].append(full_spec)
+            by_package_norm[pkg_lower].add(_strip_extras_from_spec(f"{extras}{spec}"))
 
         # Find a package with multiple different specs (conflict)
         for pkg_lower, specs in by_package.items():
-            if len(specs) >= 2:
+            if len(by_package_norm.get(pkg_lower, set())) >= 2:
                 # Extract package name from the first spec (e.g., "requests" from "requests<2.0")
                 pkg_name = re.split(r"[<>=!]", specs[0])[0]
                 return Conflict(
