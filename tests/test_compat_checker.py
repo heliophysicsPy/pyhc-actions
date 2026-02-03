@@ -120,6 +120,31 @@ warning: Some unrelated warning
         assert "<2" in conflicts[0].your_requirement
         assert ">=2.0" in conflicts[0].pyhc_requirement
 
+    def test_only_available_and_depends_on_with_extras(self):
+        """Test parsing 'only X<Y is available and Z depends on X[extra]>=Y'."""
+        stderr = """
+× No solution found when resolving dependencies:
+╰─▶ Because only sunpy<7.0 is available and aiapy==0.11.0 depends on sunpy[image]>=7.0, we can conclude that aiapy==0.11.0 cannot be used.
+"""
+        conflicts = parse_uv_error(stderr, package_name="sunpy")
+        assert len(conflicts) == 1
+        assert conflicts[0].package == "sunpy"
+        assert conflicts[0].your_requirement == "sunpy<7.0"
+        assert conflicts[0].pyhc_requirement == "sunpy[image]>=7.0"
+
+    def test_no_version_of_package(self):
+        """Test parsing 'no version of X==Y and you require X==Y'."""
+        stderr = """
+× No solution found when resolving dependencies:
+╰─▶ Because there is no version of asilib==0.29.0 and you require asilib==0.29.0, we can conclude that your requirements are unsatisfiable.
+"""
+        conflicts = parse_uv_error(stderr)
+        assert len(conflicts) == 1
+        assert conflicts[0].package == "asilib"
+        assert conflicts[0].your_requirement == "(not specified)"
+        assert conflicts[0].pyhc_requirement == "asilib==0.29.0"
+        assert "No matching distribution" in conflicts[0].reason
+
     def test_depends_on_both_sides_pattern(self):
         """Test parsing 'depends on' on both sides."""
         stderr = """

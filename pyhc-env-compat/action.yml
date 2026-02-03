@@ -56,9 +56,17 @@ runs:
       shell: bash
       env:
         PYTHONPATH: ${{ github.action_path }}/../src
-        PATH: ${{ env.HOME }}/.local/bin:${{ env.PATH }}
       run: |
         export PATH="$HOME/.local/bin:$PATH"
+
+        # Ensure git history/tags are available for setuptools_scm versioning
+        if [ -d .git ]; then
+          if git rev-parse --is-shallow-repository >/dev/null 2>&1; then
+            git fetch --quiet --unshallow --tags --force --prune
+          else
+            git fetch --quiet --tags --force --prune
+          fi
+        fi
 
         REQUIREMENTS_ARG=""
         if [ -n "${{ inputs.pyhc-requirements-url }}" ]; then
