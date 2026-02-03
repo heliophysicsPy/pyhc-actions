@@ -256,6 +256,7 @@ def check_compatibility(
                 uv_path,
                 "pip",
                 "compile",
+                "--no-config",
                 temp_requirements,
             ],
             capture_output=True,
