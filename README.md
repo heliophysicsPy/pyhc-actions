@@ -65,7 +65,7 @@ ERRORS:
 
 WARNINGS:
 [WARN] numpy>=2.3; python_version == "3.14" drops support for numpy 2.0 too early
-        numpy 2.0 must still be supported per PHEP 3
+        numpy 2.0 should still be supported per PHEP 3
         Suggested: Drops PHEP 3 min (2.0); marker allows min for some supported Pythons
 
 [WARN] scipy<1.14 has upper bound constraint

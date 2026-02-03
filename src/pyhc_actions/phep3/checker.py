@@ -386,7 +386,7 @@ def _check_lower_bound(
                 reporter.add_warning(
                     package=dep.name,
                     message=f"{dep.raw} drops support for {dep.name} {min_supported} too early",
-                    details=f"{dep.name} {min_supported} must still be supported per PHEP 3",
+                    details=f"{dep.name} {min_supported} should still be supported per PHEP 3",
                     suggestion=f"Drops PHEP 3 min ({min_supported}); marker allows min for some supported Pythons",
                 )
             else:

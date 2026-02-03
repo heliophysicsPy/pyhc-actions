@@ -379,6 +379,7 @@ dependencies = [
             warnings = [w for w in reporter.warnings if w.package == "numpy"]
             assert len(warnings) == 1
             assert "drops support" in warnings[0].message
+            assert warnings[0].details == "numpy 2.0 should still be supported per PHEP 3"
             assert warnings[0].suggestion == "Drops PHEP 3 min (2.0); marker allows min for some supported Pythons"
 
     def test_marker_all_supported_keeps_error(self, marker_schedule):
@@ -457,6 +458,7 @@ dependencies = [
             assert not reporter.has_errors
             warnings = [w for w in reporter.warnings if w.package == "numpy"]
             assert len(warnings) == 1
+            assert warnings[0].details == "numpy 2.0 should still be supported per PHEP 3"
             assert warnings[0].suggestion == "Drops PHEP 3 min (2.0); marker allows min for some supported Pythons"
 
 
