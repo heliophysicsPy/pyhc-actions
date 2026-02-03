@@ -6,7 +6,7 @@ Reusable GitHub Actions for PyHC (Python in Heliophysics Community) package comp
 
 ### 1. PHEP 3 Compliance Checker
 
-Validates package requirements against [PHEP 3](https://doi.org/10.5281/zenodo.17794207):
+Validates package requirements against [PHEP 3](https://github.com/heliophysicsPy/standards/blob/main/pheps/phep-0003.md):
 
 - Python versions supported for **36 months** after release
 - Core Scientific Python packages (numpy, scipy, matplotlib, pandas, scikit-image, networkx, scikit-learn, xarray, ipython, zarr) supported for **24 months** after release
