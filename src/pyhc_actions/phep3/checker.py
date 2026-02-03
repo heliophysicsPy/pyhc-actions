@@ -70,14 +70,20 @@ def check_compliance(
             requires_python = project.get("requires-python")
             dependencies = get_dependencies_from_pyproject(pyproject_data)
             extraction_method = "pyproject.toml"
-    except FileNotFoundError:
+    except (FileNotFoundError, IsADirectoryError):
+        reporter.add_warning(
+            package="-",
+            message="'pyproject.toml' not found; will attempt uv-based extraction for legacy formats",
+            suggestion="Consider using pyproject.toml",
+        )
         pyproject_data = None
         project = {}
     except Exception as e:
         reporter.add_warning(
-            package="pyproject.toml",
+            package="-",
             message=f"Failed to parse pyproject.toml: {e}",
             details="Will attempt uv-based extraction if available",
+            suggestion="Consider using pyproject.toml",
         )
         pyproject_data = None
         project = {}
@@ -102,10 +108,15 @@ def check_compliance(
                     dep = parse_dependency(dep_str)
                     if dep:
                         dependencies.append(dep)
-            extraction_method = f"uv (from {metadata.extracted_via})"
+            if metadata.extracted_via and metadata.extracted_via != "uv":
+                extraction_method = f"uv (from {metadata.extracted_via})"
+                message = f"Using {extraction_method} for metadata extraction"
+            else:
+                extraction_method = "uv"
+                message = "Using uv for metadata extraction"
             reporter.add_warning(
-                package="metadata",
-                message=f"Using {extraction_method} for metadata extraction",
+                package="-",
+                message=message,
                 details="Package uses legacy format (setup.py or Poetry)",
             )
 
@@ -151,6 +162,7 @@ def _check_python_version(
             package="python",
             message="No requires-python specified",
             details="Consider adding requires-python to specify supported Python versions",
+            suggestion="Consider using requires-python to specify supported Python versions",
         )
         return
 

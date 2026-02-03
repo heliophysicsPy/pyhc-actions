@@ -309,6 +309,61 @@ dependencies = [
 
         assert passed is False
         assert reporter.has_errors
+        assert reporter.has_warnings
+        warn = reporter.warnings[0]
+        assert warn.package == "-"
+        assert "'pyproject.toml' not found" in warn.message
+        assert "legacy formats" in warn.message
+        assert warn.suggestion == "Consider using pyproject.toml"
+
+    def test_uv_metadata_warning_format(self, schedule, monkeypatch):
+        """Test uv metadata extraction warning format."""
+        from pyhc_actions.phep3.metadata_extractor import PackageMetadata
+
+        def fake_extract_metadata_from_project(project_dir, schedule):
+            return PackageMetadata(
+                name="legacy-package",
+                requires_python=">=3.10",
+                dependencies=[],
+                optional_dependencies={},
+                extracted_via="uv",
+            )
+
+        monkeypatch.setattr(
+            "pyhc_actions.phep3.metadata_extractor.extract_metadata_from_project",
+            fake_extract_metadata_from_project,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            reporter = Reporter()
+            passed = check_compliance(tmpdir, schedule, reporter, use_uv_fallback=True)
+
+            assert passed is True
+            # Ensure the uv metadata warning is present and formatted
+            messages = [w.message for w in reporter.warnings]
+            assert "Using uv for metadata extraction" in messages
+            uv_warn = next(w for w in reporter.warnings if w.message == "Using uv for metadata extraction")
+            assert uv_warn.package == "-"
+            assert uv_warn.suggestion == ""
+
+    def test_no_requires_python_suggestion(self, schedule):
+        """Test suggestion for missing requires-python."""
+        content = """
+[project]
+name = "legacy-package"
+version = "1.0.0"
+dependencies = ["numpy>=1.20"]
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+            f.write(content)
+            f.flush()
+
+            reporter = Reporter()
+            passed = check_compliance(f.name, schedule, reporter, use_uv_fallback=False)
+
+            assert passed is True
+            warn = next(w for w in reporter.warnings if w.message == "No requires-python specified")
+            assert warn.suggestion == "Consider using requires-python to specify supported Python versions"
 
 
 class TestPythonVersionMarkers:
