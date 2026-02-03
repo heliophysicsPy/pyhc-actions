@@ -55,20 +55,24 @@ PHEP 3 Compliance Check
 ========================
 
 ERRORS:
-[ERROR] requires-python = ">=3.9" drops support for Python 3.11 too early
-        Python 3.11 must still be supported per PHEP 3
-        Suggested: Change to requires-python = ">=3.11"
+[ERROR] requires-python = ">=3.13" drops support for Python 3.12 too early
+        Python 3.12 must still be supported per PHEP 3
+        Suggested: Change to requires-python = ">=3.12"
 
-[ERROR] numpy>=1.19 drops support for numpy 1.26 too early
-        numpy 1.26 must still be supported per PHEP 3
-        Suggested: Change to numpy>=1.26
+[ERROR] numpy<2 does not support required version 2.0
+        Version 2.0 must be supported within 6 months of release
+        Suggested: Update upper bound to include 2.0
 
 WARNINGS:
+[WARN] numpy>=2.3; python_version == "3.14" drops support for numpy 2.0 too early
+        numpy 2.0 must still be supported per PHEP 3
+        Suggested: Drops PHEP 3 min (2.0); marker allows min for some supported Pythons
+
 [WARN] scipy<1.14 has upper bound constraint
         Upper bounds should only be used when absolutely necessary
         Suggested: Consider removing <1.14 unless required
 
-Summary: 2 error(s), 1 warning(s)
+Summary: 2 error(s), 2 warning(s)
 Status: FAILED
 ```
 
