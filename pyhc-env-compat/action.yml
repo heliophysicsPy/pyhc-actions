@@ -56,7 +56,6 @@ runs:
       shell: bash
       env:
         PYTHONPATH: ${{ github.action_path }}/../src
-        PATH: ${{ env.HOME }}/.local/bin:${{ env.PATH }}
       run: |
         export PATH="$HOME/.local/bin:$PATH"
 
