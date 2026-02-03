@@ -311,6 +311,155 @@ dependencies = [
         assert reporter.has_errors
 
 
+class TestPythonVersionMarkers:
+    """Tests for python_version/python_full_version markers in dependencies."""
+
+    @pytest.fixture
+    def marker_schedule(self):
+        """Create a fixed schedule for marker tests."""
+        now = datetime(2026, 2, 3, tzinfo=timezone.utc)
+        schedule = Schedule(
+            generated_at=now,
+            python={
+                "3.12": VersionSchedule(
+                    version="3.12",
+                    release_date=datetime(2023, 10, 2, tzinfo=timezone.utc),
+                    drop_date=datetime(2026, 10, 2, tzinfo=timezone.utc),
+                    support_by=datetime(2024, 4, 2, tzinfo=timezone.utc),
+                ),
+                "3.13": VersionSchedule(
+                    version="3.13",
+                    release_date=datetime(2024, 10, 7, tzinfo=timezone.utc),
+                    drop_date=datetime(2027, 10, 7, tzinfo=timezone.utc),
+                    support_by=datetime(2025, 4, 7, tzinfo=timezone.utc),
+                ),
+                "3.14": VersionSchedule(
+                    version="3.14",
+                    release_date=datetime(2025, 10, 7, tzinfo=timezone.utc),
+                    drop_date=datetime(2028, 10, 7, tzinfo=timezone.utc),
+                    support_by=datetime(2026, 4, 7, tzinfo=timezone.utc),
+                ),
+            },
+            packages={
+                "numpy": {
+                    "2.0": VersionSchedule(
+                        version="2.0",
+                        release_date=datetime(2024, 6, 16, tzinfo=timezone.utc),
+                        drop_date=datetime(2026, 6, 16, tzinfo=timezone.utc),
+                        support_by=datetime(2024, 12, 16, tzinfo=timezone.utc),
+                    ),
+                },
+            },
+        )
+        return now, schedule
+
+    def test_marker_some_supported_downgrades_lower_bound(self, marker_schedule):
+        """Marker true for some supported versions should downgrade lower-bound error to warning."""
+        now, schedule = marker_schedule
+        content = """
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.3; python_version == \\"3.14\\"",
+]
+"""
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".toml", delete=False
+        ) as f:
+            f.write(content)
+            f.flush()
+
+            reporter = Reporter()
+            passed = check_compliance(f.name, schedule, reporter, now=now, use_uv_fallback=False)
+
+            assert passed is True
+            assert not reporter.has_errors
+            warnings = [w for w in reporter.warnings if w.package == "numpy"]
+            assert len(warnings) == 1
+            assert "drops support" in warnings[0].message
+            assert warnings[0].suggestion == "Drops PHEP 3 min (2.0); marker allows min for some supported Pythons"
+
+    def test_marker_all_supported_keeps_error(self, marker_schedule):
+        """Marker true for all supported versions should keep lower-bound error."""
+        now, schedule = marker_schedule
+        content = """
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.3; python_version >= \\"3.12\\"",
+]
+"""
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".toml", delete=False
+        ) as f:
+            f.write(content)
+            f.flush()
+
+            reporter = Reporter()
+            passed = check_compliance(f.name, schedule, reporter, now=now, use_uv_fallback=False)
+
+            assert passed is False
+            assert reporter.has_errors
+            error_messages = [e.message for e in reporter.errors]
+            assert any("drops support" in msg for msg in error_messages)
+
+    def test_marker_none_supported_is_ignored(self, marker_schedule):
+        """Marker false for all supported versions should be ignored."""
+        now, schedule = marker_schedule
+        content = """
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.3; python_version == \\"3.11\\"",
+]
+"""
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".toml", delete=False
+        ) as f:
+            f.write(content)
+            f.flush()
+
+            reporter = Reporter()
+            passed = check_compliance(f.name, schedule, reporter, now=now, use_uv_fallback=False)
+
+            assert passed is True
+            assert not reporter.has_errors
+            assert not reporter.has_warnings
+
+    def test_python_full_version_marker_is_respected(self, marker_schedule):
+        """python_full_version markers should be treated like python_version."""
+        now, schedule = marker_schedule
+        content = """
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.3; python_full_version == \\"3.14.0\\"",
+]
+"""
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".toml", delete=False
+        ) as f:
+            f.write(content)
+            f.flush()
+
+            reporter = Reporter()
+            passed = check_compliance(f.name, schedule, reporter, now=now, use_uv_fallback=False)
+
+            assert passed is True
+            assert not reporter.has_errors
+            warnings = [w for w in reporter.warnings if w.package == "numpy"]
+            assert len(warnings) == 1
+            assert warnings[0].suggestion == "Drops PHEP 3 min (2.0); marker allows min for some supported Pythons"
+
+
 class TestPHEP3Errors:
     """Tests for PHEP 3 error conditions (actual violations)."""
 

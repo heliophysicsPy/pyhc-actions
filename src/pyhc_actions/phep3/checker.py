@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+from packaging.markers import Marker, InvalidMarker, default_environment
+from packaging.specifiers import SpecifierSet, InvalidSpecifier
 from packaging.version import Version
 
 from pyhc_actions.common.parser import (
@@ -119,9 +121,20 @@ def check_compliance(
     # Check Python version requirement
     _check_python_version(requires_python, schedule, reporter, now)
 
+    supported_python_versions = _get_supported_python_versions(
+        requires_python, schedule, now
+    )
+
     # Check dependencies
     for dep in dependencies:
-        _check_dependency(dep, schedule, reporter, check_adoption, now)
+        _check_dependency(
+            dep,
+            schedule,
+            reporter,
+            check_adoption,
+            now,
+            supported_python_versions,
+        )
 
     return not reporter.has_errors
 
@@ -253,6 +266,7 @@ def _check_dependency(
     reporter: Reporter,
     check_adoption: bool,
     now: datetime,
+    supported_python_versions: list[str],
 ):
     """Check a single dependency for PHEP 3 compliance."""
     # Only check core packages
@@ -270,6 +284,14 @@ def _check_dependency(
         return
 
     bounds = extract_version_bounds(dep.specifier)
+
+    marker_applicability = _get_python_marker_applicability(
+        dep.markers, supported_python_versions
+    )
+    if marker_applicability == "none":
+        return
+
+    downgrade_lower_bound = marker_applicability == "some"
 
     # Check for upper bound / exact constraints (warning)
     if bounds.has_max_constraint:
@@ -310,7 +332,15 @@ def _check_dependency(
 
     # Check lower bound
     if bounds.lower:
-        _check_lower_bound(dep, pkg_name, bounds.lower, schedule, reporter, now)
+        _check_lower_bound(
+            dep,
+            pkg_name,
+            bounds.lower,
+            schedule,
+            reporter,
+            now,
+            downgrade_lower_bound,
+        )
 
     # Check adoption of new versions
     if check_adoption:
@@ -335,6 +365,7 @@ def _check_lower_bound(
     schedule: Schedule,
     reporter: Reporter,
     now: datetime,
+    downgrade_error: bool = False,
 ):
     """Check if the lower bound violates PHEP 3 requirements."""
     pkg_versions = schedule.packages.get(pkg_name, {})
@@ -351,12 +382,20 @@ def _check_lower_bound(
         min_ver = Version(min_supported)
         # ERROR if lower bound is higher than minimum required (drops support too early)
         if lower_bound > min_ver:
-            reporter.add_error(
-                package=dep.name,
-                message=f"{dep.raw} drops support for {dep.name} {min_supported} too early",
-                details=f"{dep.name} {min_supported} must still be supported per PHEP 3",
-                suggestion=f"Change to {dep.name}>={min_supported}",
-            )
+            if downgrade_error:
+                reporter.add_warning(
+                    package=dep.name,
+                    message=f"{dep.raw} drops support for {dep.name} {min_supported} too early",
+                    details=f"{dep.name} {min_supported} must still be supported per PHEP 3",
+                    suggestion=f"Drops PHEP 3 min ({min_supported}); marker allows min for some supported Pythons",
+                )
+            else:
+                reporter.add_error(
+                    package=dep.name,
+                    message=f"{dep.raw} drops support for {dep.name} {min_supported} too early",
+                    details=f"{dep.name} {min_supported} must still be supported per PHEP 3",
+                    suggestion=f"Change to {dep.name}>={min_supported}",
+                )
 
     # Check if the lower bound version itself can be dropped (informational)
     version_info = pkg_versions.get(version_str)
@@ -474,6 +513,51 @@ def _check_adoption(
             details=f"Exclusions prevent supporting any of: {', '.join(excluded_by_not_equal)}",
             suggestion=f"Remove exclusions or ensure at least one required version is allowed",
         )
+
+
+def _get_supported_python_versions(
+    requires_python: str | None, schedule: Schedule, now: datetime
+) -> list[str]:
+    """Return Python versions that are supported per PHEP 3 and requires-python."""
+    supported = schedule.get_non_droppable_python_versions(now)
+    if not requires_python:
+        return supported
+
+    try:
+        spec = SpecifierSet(requires_python)
+    except InvalidSpecifier:
+        return supported
+
+    return [v for v in supported if spec.contains(v, prereleases=True)]
+
+
+def _get_python_marker_applicability(
+    markers: str | None, supported_python_versions: list[str]
+) -> str | None:
+    """Determine whether a python_version marker applies to none, some, or all supported Pythons."""
+    if not markers or not supported_python_versions:
+        return None
+
+    if "python_version" not in markers and "python_full_version" not in markers:
+        return None
+
+    try:
+        marker = Marker(markers)
+    except InvalidMarker:
+        return None
+
+    results = []
+    for version in supported_python_versions:
+        env = default_environment()
+        env["python_version"] = version
+        env["python_full_version"] = f"{version}.0"
+        results.append(marker.evaluate(env))
+
+    if all(results):
+        return "all"
+    if any(results):
+        return "some"
+    return "none"
 
 
 def check_pyproject(
