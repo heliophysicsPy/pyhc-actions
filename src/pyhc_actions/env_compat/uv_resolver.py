@@ -492,7 +492,8 @@ def parse_uv_error(stderr: str) -> list[Conflict]:
     EXTRAS = r"(?:\[[^\]]+\])?"
     # Version spec pattern: handles <, >, =, !, ~ (for ~= compatible release)
     # Examples: >=1.0, <2.0, ==1.5, !=1.3, ~=1.20, >=1.0,<2.0
-    VERSION_SPEC = r"[<>=!~][^\s]+?"
+    # Capture comma-separated constraints but avoid trailing commas.
+    VERSION_SPEC = r"[<>=!~]=?[^\\s,]+(?:,[<>=!~][^\\s,]+)*"
 
     # Pattern 1: "Because X requires pkg-spec and Y requires pkg-spec" style
     pattern1 = re.compile(
@@ -557,8 +558,8 @@ def parse_uv_error(stderr: str) -> list[Conflict]:
             conflicts.append(
                 Conflict(
                     package=pkg1,
-                    your_requirement=f"{pkg1}{spec1}",
-                    pyhc_requirement="(no matching distribution)",
+                    your_requirement="(not specified)",
+                    pyhc_requirement=f"{pkg1}{spec1}",
                     reason="No matching distribution found",
                 )
             )

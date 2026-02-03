@@ -129,7 +129,7 @@ warning: Some unrelated warning
         conflicts = parse_uv_error(stderr)
         assert len(conflicts) == 1
         assert conflicts[0].package == "sunpy"
-        assert "sunpy[image]>=" in conflicts[0].your_requirement
+        assert conflicts[0].your_requirement == "sunpy[image]>=7.0"
         assert "sunpy<7.0" in conflicts[0].pyhc_requirement
 
     def test_no_version_of_package(self):
@@ -141,7 +141,8 @@ warning: Some unrelated warning
         conflicts = parse_uv_error(stderr)
         assert len(conflicts) == 1
         assert conflicts[0].package == "asilib"
-        assert conflicts[0].your_requirement == "asilib==0.29.0"
+        assert conflicts[0].your_requirement == "(not specified)"
+        assert conflicts[0].pyhc_requirement == "asilib==0.29.0"
         assert "No matching distribution" in conflicts[0].reason
 
     def test_depends_on_both_sides_pattern(self):
