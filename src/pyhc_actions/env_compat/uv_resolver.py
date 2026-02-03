@@ -335,7 +335,7 @@ def check_compatibility(
             ]
 
         # Parse conflicts from error output
-        conflicts = parse_uv_error(result.stderr)
+        conflicts = parse_uv_error(result.stderr, package_name)
 
         for conflict in conflicts:
             # Generate suggestion based on PyHC requirement
@@ -421,7 +421,7 @@ def _is_python_version_error(stderr: str) -> tuple[bool, str | None]:
     return False, None
 
 
-def parse_uv_error(stderr: str) -> list[Conflict]:
+def parse_uv_error(stderr: str, package_name: str | None = None) -> list[Conflict]:
     """Parse uv error output to extract conflict information.
 
     uv outputs messages in various formats:
@@ -533,8 +533,12 @@ def parse_uv_error(stderr: str) -> list[Conflict]:
     )
     for match in pattern_available_depends.finditer(stderr):
         avail_pkg, avail_spec, source, req_pkg, req_spec = match.groups()
-        # Order so the dependency requirement is treated as "your" requirement
-        add_conflict(req_pkg, req_spec, avail_pkg, avail_spec, source, "available")
+        # If the "available" package is the one being checked locally, treat it as "your requirement"
+        if package_name and avail_pkg.lower() == package_name.lower():
+            add_conflict(avail_pkg, avail_spec, req_pkg, req_spec, "available", source)
+        else:
+            # Default: dependency requirement is treated as "your requirement"
+            add_conflict(req_pkg, req_spec, avail_pkg, avail_spec, source, "available")
 
     # Pattern 6: "only X<Y is available and you require X>=Y"
     pattern_available_you = re.compile(

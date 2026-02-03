@@ -126,11 +126,11 @@ warning: Some unrelated warning
 × No solution found when resolving dependencies:
 ╰─▶ Because only sunpy<7.0 is available and aiapy==0.11.0 depends on sunpy[image]>=7.0, we can conclude that aiapy==0.11.0 cannot be used.
 """
-        conflicts = parse_uv_error(stderr)
+        conflicts = parse_uv_error(stderr, package_name="sunpy")
         assert len(conflicts) == 1
         assert conflicts[0].package == "sunpy"
-        assert conflicts[0].your_requirement == "sunpy[image]>=7.0"
-        assert "sunpy<7.0" in conflicts[0].pyhc_requirement
+        assert conflicts[0].your_requirement == "sunpy<7.0"
+        assert conflicts[0].pyhc_requirement == "sunpy[image]>=7.0"
 
     def test_no_version_of_package(self):
         """Test parsing 'no version of X==Y and you require X==Y'."""
