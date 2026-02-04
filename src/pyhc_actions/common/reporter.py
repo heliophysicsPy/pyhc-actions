@@ -26,6 +26,7 @@ class Issue:
     message: str
     details: str = ""
     suggestion: str = ""
+    context: str = ""
 
     def format_plain(self) -> str:
         """Format issue for plain text output."""
@@ -39,6 +40,8 @@ class Issue:
         if self.details:
             for detail in self.details.split("\n"):
                 lines.append(f"        {detail}")
+        if self.context:
+            lines.append(f"        Extras: {self.context}")
         if self.suggestion:
             lines.append(f"        Suggested: {self.suggestion}")
 
@@ -106,19 +109,41 @@ class Reporter:
         self.issues.append(issue)
 
     def add_error(
-        self, package: str, message: str, details: str = "", suggestion: str = ""
+        self,
+        package: str,
+        message: str,
+        details: str = "",
+        suggestion: str = "",
+        context: str = "",
     ):
         """Add an error issue."""
         self.add_issue(
-            Violation(package=package, message=message, details=details, suggestion=suggestion)
+            Violation(
+                package=package,
+                message=message,
+                details=details,
+                suggestion=suggestion,
+                context=context,
+            )
         )
 
     def add_warning(
-        self, package: str, message: str, details: str = "", suggestion: str = ""
+        self,
+        package: str,
+        message: str,
+        details: str = "",
+        suggestion: str = "",
+        context: str = "",
     ):
         """Add a warning issue."""
         self.add_issue(
-            Warning(package=package, message=message, details=details, suggestion=suggestion)
+            Warning(
+                package=package,
+                message=message,
+                details=details,
+                suggestion=suggestion,
+                context=context,
+            )
         )
 
     @property
@@ -196,21 +221,47 @@ class Reporter:
             # Errors table
             if self.errors:
                 f.write("### Errors\n\n")
-                f.write("| Package | Issue | Suggestion |\n")
-                f.write("|---------|-------|------------|\n")
+                has_context = any(issue.context for issue in self.issues)
+                if has_context:
+                    f.write("| Package | Extras | Issue | Suggestion |\n")
+                    f.write("|---------|--------|-------|------------|\n")
+                else:
+                    f.write("| Package | Issue | Suggestion |\n")
+                    f.write("|---------|-------|------------|\n")
                 for issue in self.errors:
                     suggestion = issue.suggestion or "-"
-                    f.write(f"| {issue.package} | {issue.message} | {suggestion} |\n")
+                    if has_context:
+                        context = issue.context or "-"
+                        f.write(
+                            f"| {issue.package} | {context} | {issue.message} | {suggestion} |\n"
+                        )
+                    else:
+                        f.write(
+                            f"| {issue.package} | {issue.message} | {suggestion} |\n"
+                        )
                 f.write("\n")
 
             # Warnings table
             if self.warnings:
                 f.write("### Warnings\n\n")
-                f.write("| Package | Issue | Suggestion |\n")
-                f.write("|---------|-------|------------|\n")
+                has_context = any(issue.context for issue in self.issues)
+                if has_context:
+                    f.write("| Package | Extras | Issue | Suggestion |\n")
+                    f.write("|---------|--------|-------|------------|\n")
+                else:
+                    f.write("| Package | Issue | Suggestion |\n")
+                    f.write("|---------|-------|------------|\n")
                 for issue in self.warnings:
                     suggestion = issue.suggestion or "-"
-                    f.write(f"| {issue.package} | {issue.message} | {suggestion} |\n")
+                    if has_context:
+                        context = issue.context or "-"
+                        f.write(
+                            f"| {issue.package} | {context} | {issue.message} | {suggestion} |\n"
+                        )
+                    else:
+                        f.write(
+                            f"| {issue.package} | {issue.message} | {suggestion} |\n"
+                        )
                 f.write("\n")
 
     def get_exit_code(self, fail_on_warning: bool = False) -> int:

@@ -140,6 +140,10 @@ def find_uv() -> str | None:
 def check_compatibility(
     pyproject_path: Path | str,
     pyhc_requirements_source: str | Path | None = None,
+    pyhc_requirements: list[str] | None = None,
+    pyhc_python: str | None = None,
+    extra: str | None = None,
+    context: str = "",
     reporter: Reporter | None = None,
 ) -> tuple[bool, list[Conflict]]:
     """Check if package is compatible with PyHC Environment using uv.
@@ -147,6 +151,10 @@ def check_compatibility(
     Args:
         pyproject_path: Path to pyproject.toml
         pyhc_requirements_source: URL or path to PyHC requirements
+        pyhc_requirements: Pre-loaded PyHC requirements list (skips fetching)
+        pyhc_python: Pre-loaded PyHC Python version (skips fetching)
+        extra: Optional extra group to install (e.g., "image")
+        context: Optional context label for reporting (e.g., "base", "image")
         reporter: Optional reporter for output
 
     Returns:
@@ -154,6 +162,7 @@ def check_compatibility(
     """
     pyproject_path = Path(pyproject_path)
     reporter = reporter or Reporter(title="PyHC Compatibility Check")
+    context = context or ("base" if extra is None else extra)
 
     # Upfront Python version compatibility check
     # This catches Python incompatibilities with a clear error message
@@ -164,7 +173,8 @@ def check_compatibility(
     except Exception:
         requires_python = None
 
-    pyhc_python = get_pyhc_python_version()
+    if pyhc_python is None:
+        pyhc_python = get_pyhc_python_version()
     if pyhc_python and requires_python:
         is_python_compat, python_error = check_python_compatibility(
             requires_python, pyhc_python
@@ -174,6 +184,7 @@ def check_compatibility(
                 package="python",
                 message="Python version incompatible with PyHC Environment",
                 details=python_error,
+                context=context,
             )
             return False, [
                 Conflict(
@@ -191,18 +202,21 @@ def check_compatibility(
             package="uv",
             message="uv not found",
             details="Install uv: curl -LsSf https://astral.sh/uv/install.sh | sh",
+            context=context,
         )
         return False, []
 
     # Load PyHC requirements
-    try:
-        pyhc_requirements = load_pyhc_requirements(pyhc_requirements_source)
-    except Exception as e:
-        reporter.add_error(
-            package="pyhc-requirements",
-            message=f"Failed to load PyHC requirements: {e}",
-        )
-        return False, []
+    if pyhc_requirements is None:
+        try:
+            pyhc_requirements = load_pyhc_requirements(pyhc_requirements_source)
+        except Exception as e:
+            reporter.add_error(
+                package="pyhc-requirements",
+                message=f"Failed to load PyHC requirements: {e}",
+                context=context,
+            )
+            return False, []
 
     # Get package path for local install
     package_path = get_package_from_pyproject(pyproject_path)
@@ -245,7 +259,10 @@ def check_compatibility(
             f.write(f"{req}\n")
 
         # Add the package being checked (use -e for local editable install)
-        f.write(f"-e {package_path}\n")
+        editable_spec = f"-e {package_path}"
+        if extra:
+            editable_spec = f"-e {package_path}[{extra}]"
+        f.write(f"{editable_spec}\n")
 
         temp_requirements = f.name
 
@@ -290,6 +307,7 @@ def check_compatibility(
                 message="Platform-specific packages in PyHC Environment",
                 details="Some packages (e.g., nvidia-nccl-cu12) are Linux-only.\n"
                 "This check may fail locally on macOS/Windows but will pass on GitHub Actions.",
+                context=context,
             )
             return True, []  # Not a real conflict
 
@@ -302,6 +320,7 @@ def check_compatibility(
                 details=f"The PyHC Environment requires {required_version}.\n"
                 "Your current Python version doesn't satisfy this requirement.\n"
                 "Run with a compatible Python version to verify package compatibility.",
+                context=context,
             )
             return True, []  # Not a package conflict
 
@@ -325,6 +344,7 @@ def check_compatibility(
                 "- Python version incompatibility\n\n"
                 "This check works best on Linux with published packages that have wheels.\n"
                 "Consider testing locally or on GitHub Actions (Linux) for accurate results.",
+                context=context,
             )
             return False, [
                 Conflict(
@@ -348,6 +368,7 @@ def check_compatibility(
                 f"PyHC Environment: {conflict.pyhc_requirement}\n"
                 f"{conflict.reason}",
                 suggestion=suggestion,
+                context=context,
             )
 
         # If no conflicts were identified but uv failed, treat as compatible
@@ -367,6 +388,7 @@ def check_compatibility(
                     "STDOUT:\n"
                     f"{stdout_text}"
                 ),
+                context=context,
             )
             return False, []
 
@@ -607,6 +629,41 @@ def parse_uv_error(stderr: str, package_name: str | None = None) -> list[Conflic
             )
 
     return conflicts
+
+
+def discover_optional_extras(pyproject_path: Path | str) -> list[str]:
+    """Discover optional dependency groups from a project.
+
+    Attempts to read [project.optional-dependencies] from pyproject.toml.
+    Falls back to uv-based metadata extraction for legacy formats.
+    """
+    pyproject_path = Path(pyproject_path)
+    pyproject_file = pyproject_path
+    if pyproject_path.is_dir():
+        pyproject_file = pyproject_path / "pyproject.toml"
+
+    if pyproject_file.exists():
+        try:
+            pyproject_data = parse_pyproject(pyproject_file)
+            project = pyproject_data.get("project", {})
+            optional_deps = project.get("optional-dependencies", {})
+            if isinstance(optional_deps, dict):
+                return sorted(optional_deps.keys())
+        except Exception:
+            pass
+
+    # Fallback to uv-based metadata extraction (setup.py / Poetry)
+    try:
+        from pyhc_actions.phep3.metadata_extractor import extract_metadata_with_uv
+
+        project_dir = pyproject_path if pyproject_path.is_dir() else pyproject_path.parent
+        metadata = extract_metadata_with_uv(project_dir)
+        if metadata and metadata.optional_dependencies:
+            return sorted(metadata.optional_dependencies.keys())
+    except Exception:
+        pass
+
+    return []
 
 
 def _extract_conflict_from_error(stderr: str) -> Conflict | None:

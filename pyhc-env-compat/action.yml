@@ -16,6 +16,10 @@ inputs:
     description: "URL to PyHC Environment requirements.txt"
     required: false
     default: "https://raw.githubusercontent.com/heliophysicsPy/pyhc-docker-environment/main/docker/pyhc-environment/contents/requirements.txt"
+  extras:
+    description: "Extras selection: auto | none | comma-separated list (e.g., mth5,vires)"
+    required: false
+    default: "auto"
 
 outputs:
   compatible:
@@ -73,7 +77,12 @@ runs:
           REQUIREMENTS_ARG="--requirements ${{ inputs.pyhc-requirements-url }}"
         fi
 
-        python -m pyhc_actions.env_compat.main $REQUIREMENTS_ARG "${{ inputs.project-file }}"
+        EXTRAS_ARG=""
+        if [ -n "${{ inputs.extras }}" ]; then
+          EXTRAS_ARG="--extras ${{ inputs.extras }}"
+        fi
+
+        python -m pyhc_actions.env_compat.main $REQUIREMENTS_ARG $EXTRAS_ARG "${{ inputs.project-file }}"
         EXIT_CODE=$?
 
         if [ $EXIT_CODE -eq 0 ]; then

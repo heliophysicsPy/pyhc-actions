@@ -7,8 +7,16 @@ import sys
 from pathlib import Path
 
 from pyhc_actions.common.reporter import Reporter
-from pyhc_actions.env_compat.uv_resolver import check_compatibility, find_uv
-from pyhc_actions.env_compat.fetcher import PYHC_REQUIREMENTS_URL
+from pyhc_actions.env_compat.uv_resolver import (
+    check_compatibility,
+    find_uv,
+    discover_optional_extras,
+)
+from pyhc_actions.env_compat.fetcher import (
+    PYHC_REQUIREMENTS_URL,
+    load_pyhc_requirements,
+    get_pyhc_python_version,
+)
 
 
 def main(args: list[str] | None = None) -> int:
@@ -50,6 +58,14 @@ Examples:
         action="store_true",
         help="Only check if uv is installed and exit",
     )
+    parser.add_argument(
+        "--extras",
+        default="auto",
+        help=(
+            "Extras selection: 'auto' (default) runs base + each extra + 'all' if defined; "
+            "'none' runs base only; or provide a comma-separated list of extras to check."
+        ),
+    )
 
     parsed_args = parser.parse_args(args)
 
@@ -85,18 +101,78 @@ Examples:
     reporter = Reporter(title="PyHC Environment Compatibility Check")
     reporter.set_file_path(str(project_path))
 
-    # Run compatibility check
-    is_compatible, conflicts = check_compatibility(
+    # Pre-load PyHC requirements once to avoid repeated downloads
+    try:
+        pyhc_requirements = load_pyhc_requirements(parsed_args.requirements)
+    except Exception as e:
+        reporter.add_error(
+            package="pyhc-requirements",
+            message=f"Failed to load PyHC requirements: {e}",
+            context="base",
+        )
+        reporter.print_report()
+        reporter.write_github_summary()
+        return 1
+
+    pyhc_python = get_pyhc_python_version()
+
+    # Discover extras
+    optional_extras = discover_optional_extras(project_path)
+
+    # Resolve extras selection
+    extras_arg = (parsed_args.extras or "auto").strip().lower()
+    extras_to_check: list[str] = []
+
+    if extras_arg in {"none", "base", "no"}:
+        extras_to_check = []
+    elif extras_arg == "auto":
+        extras_to_check = [e for e in optional_extras if e != "all"]
+        if "all" in optional_extras:
+            extras_to_check.append("all")
+    else:
+        requested = [e.strip() for e in parsed_args.extras.split(",") if e.strip()]
+        unknown = [e for e in requested if e not in optional_extras]
+        if unknown:
+            reporter.add_error(
+                package="extras",
+                message="Unknown extras requested",
+                details=", ".join(sorted(unknown)),
+                suggestion="Check [project.optional-dependencies] names",
+                context="config",
+            )
+        extras_to_check = [e for e in requested if e in optional_extras]
+
+    # Run compatibility checks
+    overall_compatible = True
+
+    # Always run base check
+    is_compatible, _ = check_compatibility(
         pyproject_path=project_path,
-        pyhc_requirements_source=parsed_args.requirements,
+        pyhc_requirements=pyhc_requirements,
+        pyhc_python=pyhc_python,
+        extra=None,
+        context="base",
         reporter=reporter,
     )
+    overall_compatible = overall_compatible and is_compatible
+
+    # Run per-extra checks
+    for extra in extras_to_check:
+        is_compatible, _ = check_compatibility(
+            pyproject_path=project_path,
+            pyhc_requirements=pyhc_requirements,
+            pyhc_python=pyhc_python,
+            extra=extra,
+            context=extra,
+            reporter=reporter,
+        )
+        overall_compatible = overall_compatible and is_compatible
 
     # Output results
     reporter.print_report()
     reporter.write_github_summary()
 
-    return 0 if is_compatible else 1
+    return 0 if overall_compatible and not reporter.has_errors else 1
 
 
 if __name__ == "__main__":

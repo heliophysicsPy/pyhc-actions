@@ -93,6 +93,7 @@ jobs:
 |-------|-------------|---------|
 | `project-file` | Path to pyproject.toml | `pyproject.toml` |
 | `pyhc-requirements-url` | URL to PyHC requirements.txt | (official GitHub URL) |
+| `extras` | Extras selection: `auto`, `none`, or comma-separated list | `auto` |
 
 #### Outputs
 
@@ -112,6 +113,7 @@ ERRORS:
         Your requirement: numpy<2.0
         PyHC Environment: numpy>=2.0,<2.3.0
         Incompatible version requirements
+        Extras: base
         Suggested: Support numpy>=2.0,<2.3.0
 
 Summary: 1 error(s), 0 warning(s)
@@ -137,6 +139,11 @@ phep3-check --no-uv-fallback pyproject.toml
 
 # Run PyHC Environment compatibility check (requires uv)
 pyhc-env-compat-check pyproject.toml
+
+# Run PyHC Environment compatibility check with extras
+pyhc-env-compat-check --extras auto pyproject.toml
+pyhc-env-compat-check --extras none pyproject.toml
+pyhc-env-compat-check --extras mth5,vires pyproject.toml
 
 # Use a local requirements.txt or alternate URL
 pyhc-env-compat-check --requirements ./requirements.txt pyproject.toml
