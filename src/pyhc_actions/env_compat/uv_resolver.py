@@ -292,7 +292,7 @@ def check_compatibility(
                 resolved[package_name.lower()] = f"{package_name} @ {package_path}"
 
             if resolved:
-                reporter.print("\nResolved Package Versions:")
+                reporter.print(f"\n\nResolved Package Versions [{context}]:")
                 reporter.print("-" * 40)
                 for package in sorted(resolved.keys()):
                     reporter.print(f"  {resolved[package]}")
