@@ -40,7 +40,7 @@ class Issue:
         if self.details:
             for detail in self.details.split("\n"):
                 lines.append(f"        {detail}")
-        if self.context:
+        if self.context and self.context != "base":
             lines.append(f"        Extras: {self.context}")
         if self.suggestion:
             lines.append(f"        Suggested: {self.suggestion}")
@@ -231,7 +231,7 @@ class Reporter:
                 for issue in self.errors:
                     suggestion = issue.suggestion or "-"
                     if has_context:
-                        context = issue.context or "-"
+                        context = issue.context if issue.context and issue.context != "base" else "-"
                         f.write(
                             f"| {issue.package} | {context} | {issue.message} | {suggestion} |\n"
                         )
@@ -254,7 +254,7 @@ class Reporter:
                 for issue in self.warnings:
                     suggestion = issue.suggestion or "-"
                     if has_context:
-                        context = issue.context or "-"
+                        context = issue.context if issue.context and issue.context != "base" else "-"
                         f.write(
                             f"| {issue.package} | {context} | {issue.message} | {suggestion} |\n"
                         )
