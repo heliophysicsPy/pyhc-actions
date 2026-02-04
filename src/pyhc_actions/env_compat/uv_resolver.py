@@ -382,6 +382,8 @@ def check_compatibility(
         for conflict in conflicts:
             # Generate suggestion based on PyHC requirement
             suggestion = f"Support {conflict.pyhc_requirement}"
+            if errors_as_warnings and context and context != "base":
+                suggestion = f"{suggestion} in [{context}]"
             _report_error(
                 package=conflict.package,
                 message=f"Dependency conflict: {conflict.package}",

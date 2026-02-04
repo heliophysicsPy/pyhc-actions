@@ -308,12 +308,14 @@ name = "demo"
             pyhc_requirements=[],
             pyhc_python="3.12.0",
             errors_as_warnings=True,
+            context="doc",
             reporter=reporter,
         )
 
         assert ok is False
         assert reporter.errors == []
         assert len(reporter.warnings) == 1
+        assert reporter.warnings[0].suggestion.endswith("in [doc]")
 
     def test_your_project_depends_on(self):
         """Test 'your project depends on' format."""
