@@ -221,7 +221,9 @@ class Reporter:
             # Errors table
             if self.errors:
                 f.write("### Errors\n\n")
-                has_context = any(issue.context for issue in self.issues)
+                has_context = any(
+                    issue.context and issue.context != "base" for issue in self.issues
+                )
                 if has_context:
                     f.write("| Package | Extras | Issue | Suggestion |\n")
                     f.write("|---------|--------|-------|------------|\n")
@@ -244,7 +246,9 @@ class Reporter:
             # Warnings table
             if self.warnings:
                 f.write("### Warnings\n\n")
-                has_context = any(issue.context for issue in self.issues)
+                has_context = any(
+                    issue.context and issue.context != "base" for issue in self.issues
+                )
                 if has_context:
                     f.write("| Package | Extras | Issue | Suggestion |\n")
                     f.write("|---------|--------|-------|------------|\n")

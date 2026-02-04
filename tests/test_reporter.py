@@ -67,7 +67,7 @@ class TestIssue:
         assert "| numpy | image | Test error |" in content
 
     def test_write_github_summary_base_context(self, tmp_path, monkeypatch):
-        """Test base context renders as '-' in Extras column."""
+        """Test base-only context omits Extras column."""
         summary_path = tmp_path / "summary.md"
         monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
 
@@ -76,8 +76,9 @@ class TestIssue:
         reporter.write_github_summary()
 
         content = summary_path.read_text()
-        assert "| Package | Extras | Issue | Suggestion |" in content
-        assert "| numpy | - | Test error |" in content
+        assert "| Package | Issue | Suggestion |" in content
+        assert "| Package | Extras | Issue | Suggestion |" not in content
+        assert "| numpy | Test error |" in content
 
     def test_write_github_summary_without_context(self, tmp_path, monkeypatch):
         """Test summary table omits Extras column when no context is present."""
