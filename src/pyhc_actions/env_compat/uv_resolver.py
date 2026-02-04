@@ -144,6 +144,7 @@ def check_compatibility(
     pyhc_python: str | None = None,
     extra: str | None = None,
     context: str = "",
+    errors_as_warnings: bool = False,
     reporter: Reporter | None = None,
 ) -> tuple[bool, list[Conflict]]:
     """Check if package is compatible with PyHC Environment using uv.
@@ -155,6 +156,7 @@ def check_compatibility(
         pyhc_python: Pre-loaded PyHC Python version (skips fetching)
         extra: Optional extra group to install (e.g., "image")
         context: Optional context label for reporting (e.g., "base", "image")
+        errors_as_warnings: Report errors as warnings (used for extras checks)
         reporter: Optional reporter for output
 
     Returns:
@@ -163,6 +165,29 @@ def check_compatibility(
     pyproject_path = Path(pyproject_path)
     reporter = reporter or Reporter(title="PyHC Compatibility Check")
     context = context or ("base" if extra is None else extra)
+
+    def _report_error(
+        package: str,
+        message: str,
+        details: str = "",
+        suggestion: str = "",
+    ) -> None:
+        if errors_as_warnings:
+            reporter.add_warning(
+                package=package,
+                message=message,
+                details=details,
+                suggestion=suggestion,
+                context=context,
+            )
+        else:
+            reporter.add_error(
+                package=package,
+                message=message,
+                details=details,
+                suggestion=suggestion,
+                context=context,
+            )
 
     # Upfront Python version compatibility check
     # This catches Python incompatibilities with a clear error message
@@ -180,11 +205,10 @@ def check_compatibility(
             requires_python, pyhc_python
         )
         if not is_python_compat:
-            reporter.add_error(
+            _report_error(
                 package="python",
                 message="Python version incompatible with PyHC Environment",
                 details=python_error,
-                context=context,
             )
             return False, [
                 Conflict(
@@ -198,11 +222,10 @@ def check_compatibility(
     # Find uv
     uv_path = find_uv()
     if not uv_path:
-        reporter.add_error(
+        _report_error(
             package="uv",
             message="uv not found",
             details="Install uv: curl -LsSf https://astral.sh/uv/install.sh | sh",
-            context=context,
         )
         return False, []
 
@@ -211,10 +234,9 @@ def check_compatibility(
         try:
             pyhc_requirements = load_pyhc_requirements(pyhc_requirements_source)
         except Exception as e:
-            reporter.add_error(
+            _report_error(
                 package="pyhc-requirements",
                 message=f"Failed to load PyHC requirements: {e}",
-                context=context,
             )
             return False, []
 
@@ -334,7 +356,7 @@ def check_compatibility(
             package_name = None
 
         if _is_unpublished_package_error(result.stderr, package_name):
-            reporter.add_error(
+            _report_error(
                 package=package_name or "package",
                 message="Unable to resolve package version",
                 details=f"uv couldn't resolve the package. Possible causes:\n"
@@ -344,7 +366,6 @@ def check_compatibility(
                 "- Python version incompatibility\n\n"
                 "This check works best on Linux with published packages that have wheels.\n"
                 "Consider testing locally or on GitHub Actions (Linux) for accurate results.",
-                context=context,
             )
             return False, [
                 Conflict(
@@ -361,14 +382,13 @@ def check_compatibility(
         for conflict in conflicts:
             # Generate suggestion based on PyHC requirement
             suggestion = f"Support {conflict.pyhc_requirement}"
-            reporter.add_error(
+            _report_error(
                 package=conflict.package,
                 message=f"Dependency conflict: {conflict.package}",
                 details=f"Your requirement: {conflict.your_requirement}\n"
                 f"PyHC Environment: {conflict.pyhc_requirement}\n"
                 f"{conflict.reason}",
                 suggestion=suggestion,
-                context=context,
             )
 
         # If no conflicts were identified but uv failed, treat as compatible
@@ -378,7 +398,7 @@ def check_compatibility(
             # uv failed but we couldn't parse conflicts; fail loudly to avoid false positives.
             stderr_text = result.stderr.strip() or "(uv stderr was empty)"
             stdout_text = result.stdout.strip() or "(uv stdout was empty)"
-            reporter.add_error(
+            _report_error(
                 package="uv",
                 message="uv resolution failed with no parsed conflicts",
                 details=(
@@ -388,7 +408,6 @@ def check_compatibility(
                     "STDOUT:\n"
                     f"{stdout_text}"
                 ),
-                context=context,
             )
             return False, []
 
@@ -469,8 +488,14 @@ def parse_uv_error(stderr: str, package_name: str | None = None) -> list[Conflic
     seen_packages = set()  # Track packages we've already reported to avoid duplicates
 
     # Helper to add a conflict if valid
+    def _normalize_spec(spec: str) -> str:
+        """Normalize specifier by trimming whitespace and trailing punctuation."""
+        spec = spec.strip()
+        return spec.rstrip(".,;")
+
     def _strip_extras(spec: str) -> str:
         """Normalize specifier by removing leading extras (e.g., [image])."""
+        spec = _normalize_spec(spec)
         if spec.startswith("["):
             end = spec.find("]")
             if end != -1:
@@ -480,8 +505,10 @@ def parse_uv_error(stderr: str, package_name: str | None = None) -> list[Conflic
     def add_conflict(pkg1: str, spec1: str, pkg2: str, spec2: str, source1: str, source2: str) -> bool:
         """Add conflict if packages match and specs differ. Returns True if added."""
         if pkg1.lower() == pkg2.lower() and pkg1.lower() not in seen_packages:
-            spec1_norm = _strip_extras(spec1)
-            spec2_norm = _strip_extras(spec2)
+            spec1_clean = _normalize_spec(spec1)
+            spec2_clean = _normalize_spec(spec2)
+            spec1_norm = _strip_extras(spec1_clean)
+            spec2_norm = _strip_extras(spec2_clean)
             if spec1_norm != spec2_norm:
                 seen_packages.add(pkg1.lower())
                 # Determine which is "your" (package's) requirement vs PyHC Environment
@@ -491,13 +518,13 @@ def parse_uv_error(stderr: str, package_name: str | None = None) -> list[Conflic
                 # - "you require" side = PyHC Environment requirement
                 if "you" in source2.lower():
                     # Pattern: "X depends on pkg<spec and you require pkg>=spec"
-                    your_req, pyhc_req = f"{pkg1}{spec1}", f"{pkg2}{spec2}"
+                    your_req, pyhc_req = f"{pkg1}{spec1_clean}", f"{pkg2}{spec2_clean}"
                 elif "you" in source1.lower():
                     # Pattern: "you require pkg<spec and X depends on pkg>=spec"
-                    your_req, pyhc_req = f"{pkg2}{spec2}", f"{pkg1}{spec1}"
+                    your_req, pyhc_req = f"{pkg2}{spec2_clean}", f"{pkg1}{spec1_clean}"
                 else:
                     # Default: first is user's, second is environment's
-                    your_req, pyhc_req = f"{pkg1}{spec1}", f"{pkg2}{spec2}"
+                    your_req, pyhc_req = f"{pkg1}{spec1_clean}", f"{pkg2}{spec2_clean}"
                 conflicts.append(
                     Conflict(
                         package=pkg1,
@@ -600,13 +627,15 @@ def parse_uv_error(stderr: str, package_name: str | None = None) -> list[Conflic
     for match in pattern5.finditer(stderr):
         pkg1, spec1, pkg2, spec2 = match.groups()
         if pkg1.lower() == pkg2.lower() and pkg1.lower() not in seen_packages:
-            if _strip_extras(spec1) != _strip_extras(spec2):
+            spec1_clean = _normalize_spec(spec1)
+            spec2_clean = _normalize_spec(spec2)
+            if _strip_extras(spec1_clean) != _strip_extras(spec2_clean):
                 seen_packages.add(pkg1.lower())
                 conflicts.append(
                     Conflict(
                         package=pkg1,
-                        your_requirement=f"{pkg1}{spec1}",
-                        pyhc_requirement=f"{pkg2}{spec2}",
+                        your_requirement=f"{pkg1}{spec1_clean}",
+                        pyhc_requirement=f"{pkg2}{spec2_clean}",
                         reason="Version requirements are incompatible",
                     )
                 )
@@ -679,7 +708,12 @@ def _extract_conflict_from_error(stderr: str) -> Conflict | None:
         re.IGNORECASE,
     )
 
+    def _normalize_spec(spec: str) -> str:
+        spec = spec.strip()
+        return spec.rstrip(".,;")
+
     def _strip_extras_from_spec(spec: str) -> str:
+        spec = _normalize_spec(spec)
         if spec.startswith("["):
             end = spec.find("]")
             if end != -1:
@@ -693,6 +727,7 @@ def _extract_conflict_from_error(stderr: str) -> Conflict | None:
         by_package_norm: dict[str, set[str]] = {}
         for pkg, extras, spec in matches:
             extras = extras or ""
+            spec = _normalize_spec(spec)
             full_spec = f"{pkg}{extras}{spec}"
             pkg_lower = pkg.lower()
             if pkg_lower not in by_package:

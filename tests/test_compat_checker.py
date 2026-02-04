@@ -2,6 +2,7 @@
 
 import pytest
 from unittest.mock import patch, MagicMock
+from io import StringIO
 
 from pyhc_actions.env_compat.uv_resolver import (
     parse_uv_error,
@@ -13,11 +14,13 @@ from pyhc_actions.env_compat.uv_resolver import (
     check_python_compatibility,
     parse_resolved_versions,
     discover_optional_extras,
+    check_compatibility,
 )
 from pyhc_actions.env_compat.fetcher import (
     parse_requirements_for_uv,
     parse_python_version_from_env_yml,
 )
+from pyhc_actions.common.reporter import Reporter
 
 
 class TestParseRequirementsForUV:
@@ -211,6 +214,14 @@ error: No solution found when resolving dependencies:
         assert len(conflicts) == 1
         assert conflicts[0].package == "sortedcontainers"
 
+    def test_no_conflict_when_specs_identical_with_period(self):
+        """Specs that only differ by trailing punctuation should not conflict."""
+        stderr = """
+Because project depends on docutils<0.19 and you require docutils<0.19.
+"""
+        conflicts = parse_uv_error(stderr)
+        assert len(conflicts) == 0
+
 
 class TestDiscoverOptionalExtras:
     """Tests for optional extras discovery."""
@@ -265,6 +276,44 @@ name = "demo"
 
         extras = discover_optional_extras(pyproject)
         assert extras == []
+
+
+class TestCheckCompatibilityWarnings:
+    """Tests for warning behavior in extras checks."""
+
+    def test_conflicts_reported_as_warnings(self, tmp_path, monkeypatch):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            """
+[project]
+name = "demo"
+"""
+        )
+
+        class DummyResult:
+            returncode = 1
+            stdout = ""
+            stderr = (
+                "× No solution found when resolving dependencies:\n"
+                "╰─▶ Because project depends on numpy<2.0 and you require numpy>=2.0, "
+                "we can conclude that your requirements are incompatible.\n"
+            )
+
+        monkeypatch.setattr("pyhc_actions.env_compat.uv_resolver.find_uv", lambda: "/usr/bin/uv")
+        monkeypatch.setattr("pyhc_actions.env_compat.uv_resolver.subprocess.run", lambda *a, **k: DummyResult())
+
+        reporter = Reporter(title="Test", output=StringIO(), github_actions=False)
+        ok, _conflicts = check_compatibility(
+            pyproject_path=pyproject,
+            pyhc_requirements=[],
+            pyhc_python="3.12.0",
+            errors_as_warnings=True,
+            reporter=reporter,
+        )
+
+        assert ok is False
+        assert reporter.errors == []
+        assert len(reporter.warnings) == 1
 
     def test_your_project_depends_on(self):
         """Test 'your project depends on' format."""
