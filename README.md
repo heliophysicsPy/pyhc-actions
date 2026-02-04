@@ -73,6 +73,7 @@ Status: FAILED
 Detects dependency conflicts with the [PyHC Environment](https://github.com/heliophysicsPy/pyhc-docker-environment).
 
 Conflicts in the base install fail the check. Conflicts found only in extras are reported as warnings.
+When only base conflicts exist, the summary table omits the Extras column.
 
 Uses **[uv](https://github.com/astral-sh/uv)** for fast, accurate dependency resolution that catches transitive conflicts.
 
