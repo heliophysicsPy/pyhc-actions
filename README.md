@@ -60,11 +60,15 @@ ERRORS:
         Suggested: Update upper bound to include 2.0
 
 WARNINGS:
-[WARN] scipy<1.14 has upper bound constraint
+[WARN] numpy<2 has upper bound constraint
         Upper bounds should only be used when absolutely necessary
-        Suggested: Consider removing <1.14 unless required
+        Suggested: Consider removing <2 unless required
 
-Summary: 2 error(s), 1 warning(s)
+[WARN] scipy==1.10 has exact version constraint
+        Exact constraints should only be used when absolutely necessary
+        Suggested: Remove exact constraint and use >= instead
+
+Summary: 2 error(s), 2 warning(s)
 Status: FAILED
 ```
 
