@@ -384,6 +384,8 @@ def check_compatibility(
         if temp_constraints:
             command.extend(["-c", temp_constraints])
 
+        # We used to force UV_NO_CACHE=1 here for fully cold resolves, but removed that
+        # override to improve env-compat performance across repeated extras checks.
         result = subprocess.run(
             command,
             capture_output=True,
