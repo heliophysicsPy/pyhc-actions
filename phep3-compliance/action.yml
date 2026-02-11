@@ -105,28 +105,28 @@ runs:
       env:
         PYTHONPATH: ${{ github.action_path }}/../src
       run: |
-        SCHEDULE_ARG=""
+        CHECK_ARGS=()
         if [ -n "${{ inputs.schedule-path }}" ]; then
-          SCHEDULE_ARG="--schedule ${{ inputs.schedule-path }}"
+          CHECK_ARGS+=(--schedule "${{ inputs.schedule-path }}")
         elif [ -f "${{ github.action_path }}/../schedule.json" ]; then
-          SCHEDULE_ARG="--schedule ${{ github.action_path }}/../schedule.json"
+          CHECK_ARGS+=(--schedule "${{ github.action_path }}/../schedule.json")
         fi
 
-        EXTRA_ARGS=""
         if [ "${{ inputs.fail-on-warning }}" = "true" ]; then
-          EXTRA_ARGS="$EXTRA_ARGS --fail-on-warning"
+          CHECK_ARGS+=(--fail-on-warning)
         fi
         if [ "${{ inputs.check-adoption }}" = "false" ]; then
-          EXTRA_ARGS="$EXTRA_ARGS --no-adoption-check"
+          CHECK_ARGS+=(--no-adoption-check)
         fi
         if [ "${{ inputs.use-uv-fallback }}" = "false" ]; then
-          EXTRA_ARGS="$EXTRA_ARGS --no-uv-fallback"
+          CHECK_ARGS+=(--no-uv-fallback)
         fi
         if [ -n "${{ inputs.ignore-errors-for }}" ]; then
-          EXTRA_ARGS="$EXTRA_ARGS --ignore-errors-for '${{ inputs.ignore-errors-for }}'"
+          CHECK_ARGS+=(--ignore-errors-for "${{ inputs.ignore-errors-for }}")
         fi
 
-        python -m pyhc_actions.phep3.main $SCHEDULE_ARG $EXTRA_ARGS "${{ inputs.project-file }}"
+        CHECK_ARGS+=("${{ inputs.project-file }}")
+        python -m pyhc_actions.phep3.main "${CHECK_ARGS[@]}"
         EXIT_CODE=$?
 
         if [ $EXIT_CODE -eq 0 ]; then

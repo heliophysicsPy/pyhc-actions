@@ -38,6 +38,7 @@ jobs:
 | `check-adoption` | Check 6-month adoption rule | `true` |
 | `schedule-path` | Path to schedule.json | (auto-download) |
 | `use-uv-fallback` | Use uv for metadata extraction from legacy formats | `true` |
+| `ignore-errors-for` | Comma-separated package names whose errors should be reported as warnings | `""` |
 
 #### Outputs
 
@@ -145,6 +146,9 @@ phep3-check path/to/project
 
 # Disable uv fallback
 phep3-check --no-uv-fallback pyproject.toml
+
+# Downgrade errors to warnings for specific packages
+phep3-check --ignore-errors-for xarray pyproject.toml
 
 # Run PyHC Environment compatibility check (requires uv)
 pyhc-env-compat-check pyproject.toml
