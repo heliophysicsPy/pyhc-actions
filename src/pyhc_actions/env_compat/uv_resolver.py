@@ -753,7 +753,7 @@ def discover_optional_extras(pyproject_path: Path | str) -> list[str]:
     """Discover optional dependency groups from a project.
 
     Attempts to read [project.optional-dependencies] from pyproject.toml.
-    Falls back to uv-based metadata extraction for legacy formats.
+    Falls back to uv-based metadata extraction for projects without PEP 621 metadata.
     """
     pyproject_path = Path(pyproject_path)
     pyproject_file = pyproject_path
@@ -770,7 +770,7 @@ def discover_optional_extras(pyproject_path: Path | str) -> list[str]:
         except Exception:
             pass
 
-    # Fallback to uv-based metadata extraction (setup.py / Poetry)
+    # Fallback to uv-based metadata extraction (no PEP 621 metadata)
     try:
         from pyhc_actions.phep3.metadata_extractor import extract_metadata_with_uv
 

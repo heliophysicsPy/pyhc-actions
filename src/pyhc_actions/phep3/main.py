@@ -60,7 +60,7 @@ Examples:
     parser.add_argument(
         "--no-uv-fallback",
         action="store_true",
-        help="Disable uv-based metadata extraction for legacy formats",
+        help="Disable uv-based metadata extraction for projects without PEP 621 metadata",
     )
 
     parser.add_argument(
@@ -93,7 +93,7 @@ Examples:
         setup_cfg = project_dir / "setup.cfg"
 
         if not parsed_args.no_uv_fallback and (setup_py.exists() or setup_cfg.exists()):
-            # uv fallback enabled and legacy format exists
+            # uv fallback enabled and setup.py/setup.cfg exists
             # Pass project directory to checker instead of pyproject.toml path
             project_path = project_dir
         else:

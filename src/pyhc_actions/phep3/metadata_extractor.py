@@ -1,4 +1,4 @@
-"""Metadata extraction for legacy project formats using uv."""
+"""Metadata extraction for non-PEP 621 project formats using uv."""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ def extract_metadata_with_uv(
 ) -> PackageMetadata | None:
     """Extract package metadata using uv.
 
-    This works for setup.py-only projects and Poetry projects by:
+    This works for projects without PEP 621 metadata (setup.py, setup.cfg, Poetry) by:
     1. Creating a temporary venv with a specific Python version
     2. Installing the package without dependencies
     3. Reading metadata via importlib.metadata
@@ -233,7 +233,7 @@ def extract_metadata_from_project(
 
     Attempts extraction in order:
     1. PEP 621 pyproject.toml
-    2. uv-based extraction (for setup.py, Poetry, etc.)
+    2. uv-based extraction (for projects without PEP 621 metadata)
 
     Args:
         project_path: Path to project directory or pyproject.toml
@@ -282,7 +282,7 @@ def extract_metadata_from_project(
         except Exception:
             pass
 
-    # Try uv-based extraction for legacy formats
+    # Try uv-based extraction (no PEP 621 metadata found)
     python_version = None
     if schedule:
         python_version = get_min_phep3_python(schedule)

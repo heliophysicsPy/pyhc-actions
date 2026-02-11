@@ -45,7 +45,7 @@ def check_compliance(
         reporter: Reporter for output
         check_adoption: Whether to check 6-month adoption rule
         now: Current time (for testing)
-        use_uv_fallback: Whether to use uv for legacy format extraction
+        use_uv_fallback: Whether to use uv for projects without PEP 621 metadata
 
     Returns:
         True if compliant (no errors), False otherwise
@@ -84,7 +84,7 @@ def check_compliance(
     except (FileNotFoundError, IsADirectoryError):
         reporter.add_warning(
             package="-",
-            message="'pyproject.toml' not found; will attempt uv-based extraction for legacy formats",
+            message="'pyproject.toml' not found; will attempt uv-based metadata extraction",
             suggestion="Consider using pyproject.toml",
         )
         pyproject_data = None
@@ -130,7 +130,7 @@ def check_compliance(
             reporter.add_warning(
                 package="-",
                 message=message,
-                details="Package uses legacy format (setup.py or Poetry)",
+                details="Project lacks PEP 621 metadata",
             )
 
     # If still no data, report error
@@ -699,7 +699,7 @@ def check_pyproject(
         schedule_path: Path to schedule.json (optional, will use defaults)
         check_adoption: Whether to check 6-month adoption rule
         fail_on_warning: Whether warnings should cause failure
-        use_uv_fallback: Whether to use uv for legacy format extraction
+        use_uv_fallback: Whether to use uv for projects without PEP 621 metadata
 
     Returns:
         Tuple of (passed, reporter)
