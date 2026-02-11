@@ -37,7 +37,7 @@ jobs:
 | `fail-on-warning` | Treat warnings as errors | `false` |
 | `check-adoption` | Check 6-month adoption rule | `true` |
 | `schedule-path` | Path to schedule.json | (auto-download) |
-| `use-uv-fallback` | Use uv for metadata extraction from legacy formats | `true` |
+| `use-uv-fallback` | Use uv metadata extraction for projects with non-PEP 621 metadata (including setup.py/setup.cfg) | `true` |
 | `ignore-errors-for` | Comma-separated package names whose errors should be reported as warnings | `""` |
 
 #### Outputs
@@ -141,7 +141,7 @@ pip install -e .
 # Run PHEP 3 check
 phep3-check pyproject.toml
 
-# Run PHEP 3 check with legacy format (setup.py/setup.cfg/Poetry) via uv fallback
+# Run PHEP 3 check for projects with non-PEP 621 metadata (including setup.py/setup.cfg and Poetry)
 phep3-check path/to/project
 
 # Disable uv fallback

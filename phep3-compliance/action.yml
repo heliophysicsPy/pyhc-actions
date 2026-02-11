@@ -25,7 +25,7 @@ inputs:
     required: false
     default: ""
   use-uv-fallback:
-    description: "Use uv for metadata extraction from legacy formats (setup.py, Poetry)"
+    description: "Use uv metadata extraction for projects with non-PEP 621 metadata (including setup.py/setup.cfg)"
     required: false
     default: "true"
   ignore-errors-for:
