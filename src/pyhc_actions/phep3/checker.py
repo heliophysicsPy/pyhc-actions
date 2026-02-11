@@ -46,7 +46,7 @@ def check_compliance(
         reporter: Reporter for output
         check_adoption: Whether to check 6-month adoption rule
         now: Current time (for testing)
-        use_uv_fallback: Whether to use uv for legacy format extraction
+        use_uv_fallback: Whether to use uv for projects with non-PEP 621 metadata
         ignore_errors_for: Set of package names (lowercase) to treat errors as warnings
 
     Returns:
@@ -84,11 +84,10 @@ def check_compliance(
                         extras_dependencies[group_name].append(dep)
             extraction_method = "pyproject.toml"
     except (FileNotFoundError, IsADirectoryError):
-        reporter.add_warning(
-            package="-",
-            message="'pyproject.toml' not found; will attempt uv-based extraction for legacy formats",
-            suggestion="Consider using pyproject.toml",
-        )
+        if use_uv_fallback:
+            reporter.print("Note: 'pyproject.toml' not found; attempting uv metadata extraction.")
+        else:
+            reporter.print("Note: 'pyproject.toml' not found.")
         pyproject_data = None
         project = {}
     except Exception as e:
@@ -125,15 +124,12 @@ def check_compliance(
                         extras_dependencies[group_name].append(dep)
             if metadata.extracted_via and metadata.extracted_via != "uv":
                 extraction_method = f"uv (from {metadata.extracted_via})"
-                message = f"Using {extraction_method} for metadata extraction"
+                reporter.print(
+                    f"Note: Using {extraction_method} metadata extraction for non-PEP 621 metadata."
+                )
             else:
                 extraction_method = "uv"
-                message = "Using uv for metadata extraction"
-            reporter.add_warning(
-                package="-",
-                message=message,
-                details="Package uses legacy format (setup.py or Poetry)",
-            )
+                reporter.print("Note: Using uv metadata extraction for non-PEP 621 metadata.")
 
     # If still no data, report error
     if extraction_method is None:
@@ -704,7 +700,7 @@ def check_pyproject(
         schedule_path: Path to schedule.json (optional, will use defaults)
         check_adoption: Whether to check 6-month adoption rule
         fail_on_warning: Whether warnings should cause failure
-        use_uv_fallback: Whether to use uv for legacy format extraction
+        use_uv_fallback: Whether to use uv for projects with non-PEP 621 metadata
         ignore_errors_for: Set of package names (lowercase) to treat errors as warnings
 
     Returns:

@@ -304,22 +304,47 @@ dependencies = [
             assert passed is True
             assert not reporter.has_errors
 
-    def test_missing_pyproject(self, schedule):
+    def test_missing_pyproject(self, schedule, capsys):
         """Test handling missing pyproject.toml."""
         reporter = Reporter()
         passed = check_compliance("/nonexistent/pyproject.toml", schedule, reporter, use_uv_fallback=False)
+        captured = capsys.readouterr()
 
         assert passed is False
         assert reporter.has_errors
-        assert reporter.has_warnings
-        warn = reporter.warnings[0]
-        assert warn.package == "-"
-        assert "'pyproject.toml' not found" in warn.message
-        assert "legacy formats" in warn.message
-        assert warn.suggestion == "Consider using pyproject.toml"
+        assert not reporter.has_warnings
+        assert "Note: 'pyproject.toml' not found." in captured.out
 
-    def test_uv_metadata_warning_format(self, schedule, monkeypatch):
-        """Test uv metadata extraction warning format."""
+    def test_uv_metadata_note_format(self, schedule, monkeypatch, capsys):
+        """Test uv metadata extraction note format."""
+        from pyhc_actions.phep3.metadata_extractor import PackageMetadata
+
+        def fake_extract_metadata_from_project(project_dir, schedule):
+            return PackageMetadata(
+                name="legacy-package",
+                requires_python=">=3.10",
+                dependencies=[],
+                optional_dependencies={},
+                extracted_via="uv",
+            )
+
+        monkeypatch.setattr(
+            "pyhc_actions.phep3.metadata_extractor.extract_metadata_from_project",
+            fake_extract_metadata_from_project,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            reporter = Reporter()
+            passed = check_compliance(tmpdir, schedule, reporter, use_uv_fallback=True)
+            captured = capsys.readouterr()
+
+            assert passed is True
+            assert not reporter.has_warnings
+            assert "Note: 'pyproject.toml' not found; attempting uv metadata extraction." in captured.out
+            assert "Note: Using uv metadata extraction for non-PEP 621 metadata." in captured.out
+
+    def test_uv_fallback_notes_do_not_count_as_warnings(self, schedule, monkeypatch):
+        """Test uv fallback notes don't contribute to warning counts."""
         from pyhc_actions.phep3.metadata_extractor import PackageMetadata
 
         def fake_extract_metadata_from_project(project_dir, schedule):
@@ -341,12 +366,7 @@ dependencies = [
             passed = check_compliance(tmpdir, schedule, reporter, use_uv_fallback=True)
 
             assert passed is True
-            # Ensure the uv metadata warning is present and formatted
-            messages = [w.message for w in reporter.warnings]
-            assert "Using uv for metadata extraction" in messages
-            uv_warn = next(w for w in reporter.warnings if w.message == "Using uv for metadata extraction")
-            assert uv_warn.package == "-"
-            assert uv_warn.suggestion == ""
+            assert len(reporter.warnings) == 0
 
     def test_no_requires_python_suggestion(self, schedule):
         """Test suggestion for missing requires-python."""
