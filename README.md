@@ -1,6 +1,6 @@
 # PyHC GitHub Actions
 
-Reusable GitHub Actions for PyHC (Python in Heliophysics Community) package compliance checking.
+Reusable GitHub Actions for Python in Heliophysics Community (PyHC) package compliance checking.
 
 ## Actions
 
@@ -12,6 +12,9 @@ Validates package requirements against [PHEP 3](https://github.com/heliophysicsP
 - Core Scientific Python packages (numpy, scipy, matplotlib, pandas, scikit-image, networkx, scikit-learn, xarray, ipython, zarr) supported for **24 months** after release
 - New versions adopted within **6 months** of release
 - Warnings on max/exact constraints (e.g., `numpy<2`, `scipy==1.10`)
+
+Violations in the base install fail the check. Violations found only in extras are reported as warnings.
+
 
 #### Usage
 
