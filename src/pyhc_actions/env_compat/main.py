@@ -152,7 +152,7 @@ Examples:
         pyhc_python=pyhc_python,
         extra=None,
         context="base",
-        errors_as_warnings=False,
+        report_as_warning=False,
         reporter=reporter,
     )
     overall_compatible = overall_compatible and is_compatible
@@ -165,7 +165,7 @@ Examples:
             pyhc_python=pyhc_python,
             extra=extra,
             context=extra,
-            errors_as_warnings=True,
+            report_as_warning=True,
             reporter=reporter,
         )
 

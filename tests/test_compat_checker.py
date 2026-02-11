@@ -307,7 +307,7 @@ name = "demo"
             pyproject_path=pyproject,
             pyhc_requirements=[],
             pyhc_python="3.12.0",
-            errors_as_warnings=True,
+            report_as_warning=True,
             context="doc",
             reporter=reporter,
         )

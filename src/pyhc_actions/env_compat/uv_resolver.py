@@ -22,6 +22,12 @@ from pyhc_actions.env_compat.fetcher import (
 )
 
 
+def _normalize_spec(spec: str) -> str:
+    """Normalize version specifier by trimming whitespace and trailing punctuation."""
+    spec = spec.strip()
+    return spec.rstrip(".,;")
+
+
 def parse_resolved_versions(uv_output: str) -> dict[str, str]:
     """Parse resolved package versions from uv pip compile output.
 
@@ -144,7 +150,7 @@ def check_compatibility(
     pyhc_python: str | None = None,
     extra: str | None = None,
     context: str = "",
-    errors_as_warnings: bool = False,
+    report_as_warning: bool = False,
     reporter: Reporter | None = None,
 ) -> tuple[bool, list[Conflict]]:
     """Check if package is compatible with PyHC Environment using uv.
@@ -156,7 +162,7 @@ def check_compatibility(
         pyhc_python: Pre-loaded PyHC Python version (skips fetching)
         extra: Optional extra group to install (e.g., "image")
         context: Optional context label for reporting (e.g., "base", "image")
-        errors_as_warnings: Report errors as warnings (used for extras checks)
+        report_as_warning: Report errors as warnings (used for extras checks)
         reporter: Optional reporter for output
 
     Returns:
@@ -172,7 +178,7 @@ def check_compatibility(
         details: str = "",
         suggestion: str = "",
     ) -> None:
-        if errors_as_warnings:
+        if report_as_warning:
             reporter.add_warning(
                 package=package,
                 message=message,
@@ -382,7 +388,7 @@ def check_compatibility(
         for conflict in conflicts:
             # Generate suggestion based on PyHC requirement
             suggestion = f"Support {conflict.pyhc_requirement}"
-            if errors_as_warnings and context and context != "base":
+            if report_as_warning and context and context != "base":
                 suggestion = f"{suggestion} in [{context}]"
             _report_error(
                 package=conflict.package,
@@ -488,12 +494,6 @@ def parse_uv_error(stderr: str, package_name: str | None = None) -> list[Conflic
     """
     conflicts = []
     seen_packages = set()  # Track packages we've already reported to avoid duplicates
-
-    # Helper to add a conflict if valid
-    def _normalize_spec(spec: str) -> str:
-        """Normalize specifier by trimming whitespace and trailing punctuation."""
-        spec = spec.strip()
-        return spec.rstrip(".,;")
 
     def _strip_extras(spec: str) -> str:
         """Normalize specifier by removing leading extras (e.g., [image])."""
@@ -709,10 +709,6 @@ def _extract_conflict_from_error(stderr: str) -> Conflict | None:
         r"(?:depends\s+on|requires?)\s+([a-zA-Z0-9_-]+)(\[[^\]]+\])?([<>=!~]+[0-9][^\s,]*)",
         re.IGNORECASE,
     )
-
-    def _normalize_spec(spec: str) -> str:
-        spec = spec.strip()
-        return spec.rstrip(".,;")
 
     def _strip_extras_from_spec(spec: str) -> str:
         spec = _normalize_spec(spec)
