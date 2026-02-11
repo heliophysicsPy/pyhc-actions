@@ -2,6 +2,7 @@
 
 import pytest
 from unittest.mock import patch, MagicMock
+from io import StringIO
 
 from pyhc_actions.env_compat.uv_resolver import (
     parse_uv_error,
@@ -12,11 +13,14 @@ from pyhc_actions.env_compat.uv_resolver import (
     _extract_error_summary,
     check_python_compatibility,
     parse_resolved_versions,
+    discover_optional_extras,
+    check_compatibility,
 )
 from pyhc_actions.env_compat.fetcher import (
     parse_requirements_for_uv,
     parse_python_version_from_env_yml,
 )
+from pyhc_actions.common.reporter import Reporter
 
 
 class TestParseRequirementsForUV:
@@ -209,6 +213,109 @@ error: No solution found when resolving dependencies:
         conflicts = parse_uv_error(stderr)
         assert len(conflicts) == 1
         assert conflicts[0].package == "sortedcontainers"
+
+    def test_no_conflict_when_specs_identical_with_period(self):
+        """Specs that only differ by trailing punctuation should not conflict."""
+        stderr = """
+Because project depends on docutils<0.19 and you require docutils<0.19.
+"""
+        conflicts = parse_uv_error(stderr)
+        assert len(conflicts) == 0
+
+
+class TestDiscoverOptionalExtras:
+    """Tests for optional extras discovery."""
+
+    def test_discover_from_pyproject(self, tmp_path):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            """
+[project]
+name = "demo"
+
+[project.optional-dependencies]
+zeta = ["zlib"]
+alpha = ["a"]
+"""
+        )
+
+        extras = discover_optional_extras(pyproject)
+        assert extras == ["alpha", "zeta"]
+
+    def test_discover_from_uv_fallback(self, tmp_path, monkeypatch):
+        from pyhc_actions.phep3.metadata_extractor import PackageMetadata
+
+        project_dir = tmp_path / "legacy"
+        project_dir.mkdir()
+
+        def fake_extract_metadata_with_uv(_path):
+            return PackageMetadata(
+                name="legacy",
+                requires_python=None,
+                dependencies=[],
+                optional_dependencies={"beta": ["b"], "alpha": ["a"]},
+                extracted_via="uv",
+            )
+
+        monkeypatch.setattr(
+            "pyhc_actions.phep3.metadata_extractor.extract_metadata_with_uv",
+            fake_extract_metadata_with_uv,
+        )
+
+        extras = discover_optional_extras(project_dir)
+        assert extras == ["alpha", "beta"]
+
+    def test_discover_none(self, tmp_path):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            """
+[project]
+name = "demo"
+"""
+        )
+
+        extras = discover_optional_extras(pyproject)
+        assert extras == []
+
+
+class TestCheckCompatibilityWarnings:
+    """Tests for warning behavior in extras checks."""
+
+    def test_conflicts_reported_as_warnings(self, tmp_path, monkeypatch):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            """
+[project]
+name = "demo"
+"""
+        )
+
+        class DummyResult:
+            returncode = 1
+            stdout = ""
+            stderr = (
+                "× No solution found when resolving dependencies:\n"
+                "╰─▶ Because project depends on numpy<2.0 and you require numpy>=2.0, "
+                "we can conclude that your requirements are incompatible.\n"
+            )
+
+        monkeypatch.setattr("pyhc_actions.env_compat.uv_resolver.find_uv", lambda: "/usr/bin/uv")
+        monkeypatch.setattr("pyhc_actions.env_compat.uv_resolver.subprocess.run", lambda *a, **k: DummyResult())
+
+        reporter = Reporter(title="Test", output=StringIO(), github_actions=False)
+        ok, _conflicts = check_compatibility(
+            pyproject_path=pyproject,
+            pyhc_requirements=[],
+            pyhc_python="3.12.0",
+            report_as_warning=True,
+            context="doc",
+            reporter=reporter,
+        )
+
+        assert ok is False
+        assert reporter.errors == []
+        assert len(reporter.warnings) == 1
+        assert reporter.warnings[0].suggestion.endswith("in [doc]")
 
     def test_your_project_depends_on(self):
         """Test 'your project depends on' format."""

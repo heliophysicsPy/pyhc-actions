@@ -60,17 +60,23 @@ ERRORS:
         Suggested: Update upper bound to include 2.0
 
 WARNINGS:
-[WARN] scipy<1.14 has upper bound constraint
+[WARN] numpy<2 has upper bound constraint
         Upper bounds should only be used when absolutely necessary
-        Suggested: Consider removing <1.14 unless required
+        Suggested: Consider removing <2 unless required
 
-Summary: 2 error(s), 1 warning(s)
+[WARN] scipy==1.10 has exact version constraint
+        Exact constraints should only be used when absolutely necessary
+        Suggested: Remove exact constraint and use >= instead
+
+Summary: 2 error(s), 2 warning(s)
 Status: FAILED
 ```
 
 ### 2. PyHC Environment Compatibility Checker
 
 Detects dependency conflicts with the [PyHC Environment](https://github.com/heliophysicsPy/pyhc-docker-environment).
+
+Conflicts in the base install fail the check. Conflicts found only in extras are reported as warnings.
 
 Uses **[uv](https://github.com/astral-sh/uv)** for fast, accurate dependency resolution that catches transitive conflicts.
 
@@ -93,6 +99,7 @@ jobs:
 |-------|-------------|---------|
 | `project-file` | Path to pyproject.toml | `pyproject.toml` |
 | `pyhc-requirements-url` | URL to PyHC requirements.txt | (official GitHub URL) |
+| `extras` | Extras selection: `auto`, `none`, or comma-separated list | `auto` |
 
 #### Outputs
 
@@ -137,6 +144,11 @@ phep3-check --no-uv-fallback pyproject.toml
 
 # Run PyHC Environment compatibility check (requires uv)
 pyhc-env-compat-check pyproject.toml
+
+# Run PyHC Environment compatibility check with extras
+pyhc-env-compat-check --extras auto pyproject.toml
+pyhc-env-compat-check --extras none pyproject.toml
+pyhc-env-compat-check --extras mth5,vires pyproject.toml
 
 # Use a local requirements.txt or alternate URL
 pyhc-env-compat-check --requirements ./requirements.txt pyproject.toml

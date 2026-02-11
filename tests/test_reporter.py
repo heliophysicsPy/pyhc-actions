@@ -32,11 +32,13 @@ class TestIssue:
             message="Version too old",
             details="numpy 1.19 is >24 months old",
             suggestion="numpy>=1.26",
+            context="base",
         )
         formatted = v.format_plain()
         assert "[ERROR]" in formatted
         assert "Version too old" in formatted
         assert "numpy 1.19" in formatted
+        assert "Extras: base" not in formatted
         assert "Suggested: numpy>=1.26" in formatted
 
     def test_format_github(self):
@@ -50,6 +52,46 @@ class TestIssue:
         assert "::error" in formatted
         assert "file=pyproject.toml" in formatted
         assert "numpy" in formatted
+
+    def test_write_github_summary_with_context(self, tmp_path, monkeypatch):
+        """Test summary table includes Extras column when context is present."""
+        summary_path = tmp_path / "summary.md"
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
+
+        reporter = Reporter(title="Test Report", github_actions=False)
+        reporter.add_error(package="numpy", message="Test error", context="image")
+        reporter.write_github_summary()
+
+        content = summary_path.read_text()
+        assert "| Package | Extras | Issue | Suggestion |" in content
+        assert "| numpy | image | Test error |" in content
+
+    def test_write_github_summary_base_context(self, tmp_path, monkeypatch):
+        """Test base-only context omits Extras column."""
+        summary_path = tmp_path / "summary.md"
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
+
+        reporter = Reporter(title="Test Report", github_actions=False)
+        reporter.add_error(package="numpy", message="Test error", context="base")
+        reporter.write_github_summary()
+
+        content = summary_path.read_text()
+        assert "| Package | Issue | Suggestion |" in content
+        assert "| Package | Extras | Issue | Suggestion |" not in content
+        assert "| numpy | Test error |" in content
+
+    def test_write_github_summary_without_context(self, tmp_path, monkeypatch):
+        """Test summary table omits Extras column when no context is present."""
+        summary_path = tmp_path / "summary.md"
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
+
+        reporter = Reporter(title="Test Report", github_actions=False)
+        reporter.add_error(package="numpy", message="Test error")
+        reporter.write_github_summary()
+
+        content = summary_path.read_text()
+        assert "| Package | Issue | Suggestion |" in content
+        assert "| Package | Extras | Issue | Suggestion |" not in content
 
 
 class TestReporter:
