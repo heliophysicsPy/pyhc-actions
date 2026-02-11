@@ -75,6 +75,12 @@ Examples:
         help="Output path for generated schedule (default: schedule.json)",
     )
 
+    parser.add_argument(
+        "--ignore-errors-for",
+        default="",
+        help="Comma-separated list of package names to treat errors as warnings",
+    )
+
     parsed_args = parser.parse_args(args)
 
     # Handle schedule generation
@@ -120,6 +126,15 @@ Examples:
                 schedule_path = candidate
                 break
 
+    # Parse ignore-errors-for into a set of normalized package names
+    ignore_errors_for: set[str] = set()
+    if parsed_args.ignore_errors_for:
+        ignore_errors_for = {
+            name.strip().lower()
+            for name in parsed_args.ignore_errors_for.split(",")
+            if name.strip()
+        }
+
     # Run compliance check
     passed, reporter = check_pyproject(
         pyproject_path=project_path,
@@ -127,6 +142,7 @@ Examples:
         check_adoption=not parsed_args.no_adoption_check,
         fail_on_warning=parsed_args.fail_on_warning,
         use_uv_fallback=not parsed_args.no_uv_fallback,
+        ignore_errors_for=ignore_errors_for,
     )
 
     # Output results

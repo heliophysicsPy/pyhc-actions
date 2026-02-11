@@ -36,6 +36,7 @@ def check_compliance(
     check_adoption: bool = True,
     now: datetime | None = None,
     use_uv_fallback: bool = True,
+    ignore_errors_for: set[str] | None = None,
 ) -> bool:
     """Check pyproject.toml compliance with PHEP 3.
 
@@ -46,6 +47,7 @@ def check_compliance(
         check_adoption: Whether to check 6-month adoption rule
         now: Current time (for testing)
         use_uv_fallback: Whether to use uv for legacy format extraction
+        ignore_errors_for: Set of package names (lowercase) to treat errors as warnings
 
     Returns:
         True if compliant (no errors), False otherwise
@@ -149,8 +151,10 @@ def check_compliance(
         requires_python, schedule, now
     )
 
-    # Check base dependencies (violations are errors)
+    # Check base dependencies (violations are errors, unless in ignore_errors_for)
+    ignore_set = ignore_errors_for or set()
     for dep in base_dependencies:
+        should_warn = dep.name.lower() in ignore_set
         _check_dependency(
             dep,
             schedule,
@@ -159,7 +163,7 @@ def check_compliance(
             now,
             supported_python_versions,
             context="base",
-            report_as_warning=False,
+            report_as_warning=should_warn,
         )
 
     # Check extras dependencies (violations are warnings)
@@ -691,6 +695,7 @@ def check_pyproject(
     check_adoption: bool = True,
     fail_on_warning: bool = False,
     use_uv_fallback: bool = True,
+    ignore_errors_for: set[str] | None = None,
 ) -> tuple[bool, Reporter]:
     """High-level function to check a pyproject.toml file.
 
@@ -700,6 +705,7 @@ def check_pyproject(
         check_adoption: Whether to check 6-month adoption rule
         fail_on_warning: Whether warnings should cause failure
         use_uv_fallback: Whether to use uv for legacy format extraction
+        ignore_errors_for: Set of package names (lowercase) to treat errors as warnings
 
     Returns:
         Tuple of (passed, reporter)
@@ -730,6 +736,7 @@ def check_pyproject(
         reporter=reporter,
         check_adoption=check_adoption,
         use_uv_fallback=use_uv_fallback,
+        ignore_errors_for=ignore_errors_for,
     )
 
     # Adjust for fail_on_warning

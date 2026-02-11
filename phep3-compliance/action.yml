@@ -28,6 +28,10 @@ inputs:
     description: "Use uv for metadata extraction from legacy formats (setup.py, Poetry)"
     required: false
     default: "true"
+  ignore-errors-for:
+    description: "Comma-separated list of package names to treat errors as warnings"
+    required: false
+    default: ""
 
 outputs:
   passed:
@@ -117,6 +121,9 @@ runs:
         fi
         if [ "${{ inputs.use-uv-fallback }}" = "false" ]; then
           EXTRA_ARGS="$EXTRA_ARGS --no-uv-fallback"
+        fi
+        if [ -n "${{ inputs.ignore-errors-for }}" ]; then
+          EXTRA_ARGS="$EXTRA_ARGS --ignore-errors-for '${{ inputs.ignore-errors-for }}'"
         fi
 
         python -m pyhc_actions.phep3.main $SCHEDULE_ARG $EXTRA_ARGS "${{ inputs.project-file }}"
