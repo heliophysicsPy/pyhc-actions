@@ -878,3 +878,179 @@ class TestScheduleHelpers:
         # Both versions are non-droppable
         assert "1.25" in non_droppable
         assert "2.0" in non_droppable
+
+
+class TestExtrasHandling:
+    """Tests for optional dependencies (extras) handling."""
+
+    @pytest.fixture
+    def schedule(self):
+        """Create a test schedule."""
+        now = datetime.now(timezone.utc)
+        return Schedule(
+            generated_at=now,
+            python={
+                "3.10": VersionSchedule(
+                    version="3.10",
+                    release_date=now - timedelta(days=800),
+                    drop_date=now + timedelta(days=295),
+                    support_by=now - timedelta(days=617),
+                ),
+                "3.11": VersionSchedule(
+                    version="3.11",
+                    release_date=now - timedelta(days=500),
+                    drop_date=now + timedelta(days=595),
+                    support_by=now - timedelta(days=317),
+                ),
+            },
+            packages={
+                "numpy": {
+                    "1.25": VersionSchedule(
+                        version="1.25",
+                        release_date=now - timedelta(days=600),
+                        drop_date=now + timedelta(days=130),
+                        support_by=now - timedelta(days=417),
+                    ),
+                    "2.0": VersionSchedule(
+                        version="2.0",
+                        release_date=now - timedelta(days=200),
+                        drop_date=now + timedelta(days=530),
+                        support_by=now - timedelta(days=17),
+                    ),
+                },
+            },
+        )
+
+    def test_base_violation_is_error(self, schedule):
+        """Test that violations in base dependencies produce errors."""
+        content = """
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=2.0",
+]
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+            f.write(content)
+            f.flush()
+
+            reporter = Reporter()
+            passed = check_compliance(f.name, schedule, reporter, use_uv_fallback=False)
+
+            # Should fail - base dependency violation is an error
+            assert passed is False
+            assert reporter.has_errors
+            assert any("drops support" in e.message for e in reporter.errors)
+
+    def test_extras_violation_is_warning(self, schedule):
+        """Test that violations in extras produce warnings, not errors."""
+        content = """
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.25",
+]
+
+[project.optional-dependencies]
+dev = ["numpy>=2.0"]
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+            f.write(content)
+            f.flush()
+
+            reporter = Reporter()
+            passed = check_compliance(f.name, schedule, reporter, use_uv_fallback=False)
+
+            # Should pass - extras violation is a warning, not an error
+            assert passed is True
+            assert not reporter.has_errors
+            # But should have a warning for the extras violation
+            extras_warnings = [w for w in reporter.warnings if "drops support" in w.message]
+            assert len(extras_warnings) >= 1
+            assert any(w.context == "dev" for w in extras_warnings)
+
+    def test_extras_context_shown_in_output(self, schedule):
+        """Test that extras context is included in warning output."""
+        content = """
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+image = ["numpy<2.0"]
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+            f.write(content)
+            f.flush()
+
+            reporter = Reporter()
+            check_compliance(f.name, schedule, reporter, use_uv_fallback=False)
+
+            # Check that warnings have the correct context
+            numpy_warnings = [w for w in reporter.warnings if w.package == "numpy"]
+            assert len(numpy_warnings) >= 1
+            assert numpy_warnings[0].context == "image"
+
+    def test_multiple_extras_tracked_separately(self, schedule):
+        """Test that violations in different extras are tracked with their context."""
+        content = """
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["numpy>=2.0"]
+image = ["numpy<1.26"]
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+            f.write(content)
+            f.flush()
+
+            reporter = Reporter()
+            passed = check_compliance(f.name, schedule, reporter, use_uv_fallback=False)
+
+            # Should pass - all violations are in extras
+            assert passed is True
+            assert not reporter.has_errors
+
+            # Should have warnings from both extras
+            contexts = {w.context for w in reporter.warnings if w.package == "numpy"}
+            assert "dev" in contexts
+            assert "image" in contexts
+
+    def test_base_error_with_extras_warning(self, schedule):
+        """Test that base errors fail even if extras only have warnings."""
+        content = """
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["numpy<1.26"]
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+            f.write(content)
+            f.flush()
+
+            reporter = Reporter()
+            passed = check_compliance(f.name, schedule, reporter, use_uv_fallback=False)
+
+            # Should fail - base dependency has an error
+            assert passed is False
+            assert reporter.has_errors
+
+            # Should also have warnings from extras
+            extras_warnings = [w for w in reporter.warnings if w.context == "dev"]
+            assert len(extras_warnings) >= 1
