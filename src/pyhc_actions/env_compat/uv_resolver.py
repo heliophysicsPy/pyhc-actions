@@ -707,7 +707,7 @@ def parse_uv_error(stderr: str, package_name: str | None = None) -> list[Conflic
                 )
             )
 
-    # Pattern 5: Look for explicit "X and Y are incompatible" with package names
+    # Pattern 8: Look for explicit "X and Y are incompatible" with package names
     pattern5 = re.compile(
         rf"({PKG_NAME})({EXTRAS}[<>=!~]+[0-9][0-9.]*)\s+.*?\s+({PKG_NAME})({EXTRAS}[<>=!~]+[0-9][0-9.]*)\s+are\s+incompatible",
         re.IGNORECASE,
@@ -897,6 +897,8 @@ def run_uv_lock_check(
 ) -> tuple[bool, str]:
     """Alternative check using uv lock with a temporary project.
 
+    This helper is currently unused in the primary env-compat flow.
+
     Creates a temporary pyproject.toml that depends on both the package
     and all PyHC packages, then runs uv lock.
 
@@ -913,6 +915,7 @@ def run_uv_lock_check(
         return False, "uv not found"
 
     pyproject_path = Path(pyproject_path)
+    package_path = get_package_from_pyproject(pyproject_path)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
@@ -924,7 +927,7 @@ def run_uv_lock_check(
                 "version": "0.0.0",
                 "requires-python": ">=3.11",
                 "dependencies": [
-                    str(pyproject_path.parent.resolve()),  # The package being checked
+                    package_path,  # The package being checked
                     *pyhc_packages,  # All PyHC packages
                 ],
             }
