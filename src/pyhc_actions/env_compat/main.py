@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -144,9 +145,10 @@ Examples:
 
     # Run compatibility checks
     overall_compatible = True
+    total_conflicts = 0
 
     # Always run base check
-    is_compatible, _ = check_compatibility(
+    is_compatible, conflicts = check_compatibility(
         pyproject_path=project_path,
         pyhc_requirements=pyhc_requirements,
         pyhc_python=pyhc_python,
@@ -155,11 +157,12 @@ Examples:
         report_as_warning=False,
         reporter=reporter,
     )
+    total_conflicts += len(conflicts)
     overall_compatible = overall_compatible and is_compatible
 
     # Run per-extra checks
     for extra in extras_to_check:
-        is_compatible, _ = check_compatibility(
+        is_compatible, conflicts = check_compatibility(
             pyproject_path=project_path,
             pyhc_requirements=pyhc_requirements,
             pyhc_python=pyhc_python,
@@ -168,12 +171,24 @@ Examples:
             report_as_warning=True,
             reporter=reporter,
         )
+        total_conflicts += len(conflicts)
 
     # Output results
     reporter.print_report()
     reporter.write_github_summary()
 
-    return 0 if overall_compatible and not reporter.has_errors else 1
+    exit_code = 0 if overall_compatible and not reporter.has_errors else 1
+    if exit_code == 0:
+        github_output = os.environ.get("GITHUB_OUTPUT")
+        if github_output:
+            try:
+                with open(github_output, "a") as f:
+                    f.write(f"conflicts={total_conflicts}\n")
+            except OSError:
+                # Don't fail the compatibility check if output export is unavailable.
+                pass
+
+    return exit_code
 
 
 if __name__ == "__main__":

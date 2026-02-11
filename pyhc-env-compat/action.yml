@@ -87,7 +87,7 @@ runs:
 
         if [ $EXIT_CODE -eq 0 ]; then
           echo "compatible=true" >> "$GITHUB_OUTPUT"
-          echo "conflicts=0" >> "$GITHUB_OUTPUT"
+          # conflicts output is populated by pyhc_actions.env_compat.main
         else
           echo "compatible=false" >> "$GITHUB_OUTPUT"
         fi
