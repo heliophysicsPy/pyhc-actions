@@ -1202,6 +1202,11 @@ dependencies = [
             # Should have warning for xarray
             xarray_warnings = [w for w in reporter.warnings if w.package == "xarray"]
             assert len(xarray_warnings) >= 1
+            lower_bound_warnings = [
+                w for w in xarray_warnings if "drops support" in w.message
+            ]
+            assert len(lower_bound_warnings) == 1
+            assert lower_bound_warnings[0].suggestion == "Change to xarray>=2024.2"
 
     def test_non_ignored_packages_still_error(self, schedule):
         """Test that packages not in ignore_errors_for still produce errors."""

@@ -480,11 +480,18 @@ def _check_lower_bound(
         # ERROR if lower bound is higher than minimum required (drops support too early)
         if lower_bound > min_ver:
             if downgrade_error or report_as_warning:
+                if downgrade_error:
+                    suggestion = (
+                        f"Drops PHEP 3 min ({min_supported}); "
+                        "marker allows min for some supported Pythons"
+                    )
+                else:
+                    suggestion = f"Change to {dep.name}>={min_supported}"
                 reporter.add_warning(
                     package=dep.name,
                     message=f"{dep.raw} drops support for {dep.name} {min_supported} too early",
                     details=f"{dep.name} {min_supported} should still be supported per PHEP 3",
-                    suggestion=f"Drops PHEP 3 min ({min_supported}); marker allows min for some supported Pythons",
+                    suggestion=suggestion,
                     context=report_context,
                 )
             else:
