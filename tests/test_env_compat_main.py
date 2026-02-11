@@ -28,7 +28,8 @@ def test_main_extras_auto(monkeypatch, tmp_path):
 
     monkeypatch.setattr(env_main, "check_compatibility", fake_check_compatibility)
     monkeypatch.setattr(env_main, "discover_optional_extras", lambda _p: ["bar", "all", "foo"])
-    monkeypatch.setattr(env_main, "load_pyhc_requirements", lambda _p: [])
+    monkeypatch.setattr(env_main, "load_pyhc_packages", lambda _p: [])
+    monkeypatch.setattr(env_main, "load_pyhc_constraints", lambda _p: [])
     monkeypatch.setattr(env_main, "get_pyhc_python_version", lambda: "3.12.0")
     monkeypatch.setattr(env_main.Reporter, "print_report", lambda _self: None)
     monkeypatch.setattr(env_main.Reporter, "write_github_summary", lambda _self: None)
@@ -51,7 +52,8 @@ def test_main_extras_none(monkeypatch, tmp_path):
 
     monkeypatch.setattr(env_main, "check_compatibility", fake_check_compatibility)
     monkeypatch.setattr(env_main, "discover_optional_extras", lambda _p: ["bar", "all", "foo"])
-    monkeypatch.setattr(env_main, "load_pyhc_requirements", lambda _p: [])
+    monkeypatch.setattr(env_main, "load_pyhc_packages", lambda _p: [])
+    monkeypatch.setattr(env_main, "load_pyhc_constraints", lambda _p: [])
     monkeypatch.setattr(env_main, "get_pyhc_python_version", lambda: "3.12.0")
     monkeypatch.setattr(env_main.Reporter, "print_report", lambda _self: None)
     monkeypatch.setattr(env_main.Reporter, "write_github_summary", lambda _self: None)
@@ -74,7 +76,8 @@ def test_main_extras_unknown(monkeypatch, tmp_path):
 
     monkeypatch.setattr(env_main, "check_compatibility", fake_check_compatibility)
     monkeypatch.setattr(env_main, "discover_optional_extras", lambda _p: ["foo"])
-    monkeypatch.setattr(env_main, "load_pyhc_requirements", lambda _p: [])
+    monkeypatch.setattr(env_main, "load_pyhc_packages", lambda _p: [])
+    monkeypatch.setattr(env_main, "load_pyhc_constraints", lambda _p: [])
     monkeypatch.setattr(env_main, "get_pyhc_python_version", lambda: "3.12.0")
     monkeypatch.setattr(env_main.Reporter, "print_report", lambda _self: None)
     monkeypatch.setattr(env_main.Reporter, "write_github_summary", lambda _self: None)
@@ -102,7 +105,8 @@ def test_main_writes_conflicts_output_on_success(monkeypatch, tmp_path):
 
     monkeypatch.setattr(env_main, "check_compatibility", fake_check_compatibility)
     monkeypatch.setattr(env_main, "discover_optional_extras", lambda _p: ["foo", "bar"])
-    monkeypatch.setattr(env_main, "load_pyhc_requirements", lambda _p: [])
+    monkeypatch.setattr(env_main, "load_pyhc_packages", lambda _p: [])
+    monkeypatch.setattr(env_main, "load_pyhc_constraints", lambda _p: [])
     monkeypatch.setattr(env_main, "get_pyhc_python_version", lambda: "3.12.0")
     monkeypatch.setattr(env_main.Reporter, "print_report", lambda _self: None)
     monkeypatch.setattr(env_main.Reporter, "write_github_summary", lambda _self: None)
@@ -127,7 +131,8 @@ def test_main_does_not_write_conflicts_output_on_failure(monkeypatch, tmp_path):
 
     monkeypatch.setattr(env_main, "check_compatibility", fake_check_compatibility)
     monkeypatch.setattr(env_main, "discover_optional_extras", lambda _p: [])
-    monkeypatch.setattr(env_main, "load_pyhc_requirements", lambda _p: [])
+    monkeypatch.setattr(env_main, "load_pyhc_packages", lambda _p: [])
+    monkeypatch.setattr(env_main, "load_pyhc_constraints", lambda _p: [])
     monkeypatch.setattr(env_main, "get_pyhc_python_version", lambda: "3.12.0")
     monkeypatch.setattr(env_main.Reporter, "print_report", lambda _self: None)
     monkeypatch.setattr(env_main.Reporter, "write_github_summary", lambda _self: None)
@@ -136,3 +141,21 @@ def test_main_does_not_write_conflicts_output_on_failure(monkeypatch, tmp_path):
 
     assert exit_code == 1
     assert not github_output.exists()
+
+
+def test_main_fails_when_constraints_load_fails(monkeypatch, tmp_path):
+    pyproject = tmp_path / "pyproject.toml"
+    _write_min_pyproject(pyproject)
+
+    monkeypatch.setattr(env_main, "load_pyhc_packages", lambda _p: [])
+    monkeypatch.setattr(
+        env_main,
+        "load_pyhc_constraints",
+        lambda _p: (_ for _ in ()).throw(RuntimeError("constraints boom")),
+    )
+    monkeypatch.setattr(env_main, "get_pyhc_python_version", lambda: "3.12.0")
+    monkeypatch.setattr(env_main.Reporter, "print_report", lambda _self: None)
+    monkeypatch.setattr(env_main.Reporter, "write_github_summary", lambda _self: None)
+
+    exit_code = env_main.main([str(pyproject)])
+    assert exit_code == 1

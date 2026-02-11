@@ -1,14 +1,16 @@
 """Tests for PHEP 3 compliance checker."""
 
+import json
 import pytest
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import tempfile
 
 from pyhc_actions.common.reporter import Reporter
-from pyhc_actions.phep3.checker import check_compliance
+from pyhc_actions.phep3.checker import check_compliance, check_pyproject
 from pyhc_actions.phep3.schedule import Schedule, VersionSchedule
 from pyhc_actions.phep3.config import is_core_package, normalize_package_name
+from pyhc_actions.phep3 import main as phep3_main
 
 
 class TestCorePackageDetection:
@@ -1054,3 +1056,476 @@ dev = ["numpy<1.26"]
             # Should also have warnings from extras
             extras_warnings = [w for w in reporter.warnings if w.context == "dev"]
             assert len(extras_warnings) >= 1
+
+
+class TestIgnoreErrorsFor:
+    """Tests for ignore_errors_for functionality."""
+
+    @pytest.fixture
+    def schedule(self):
+        """Create a test schedule with packages that will cause errors."""
+        now = datetime.now(timezone.utc)
+        return Schedule(
+            generated_at=now,
+            python={
+                "3.10": VersionSchedule(
+                    version="3.10",
+                    release_date=now - timedelta(days=800),
+                    drop_date=now + timedelta(days=295),
+                    support_by=now - timedelta(days=617),
+                ),
+                "3.11": VersionSchedule(
+                    version="3.11",
+                    release_date=now - timedelta(days=500),
+                    drop_date=now + timedelta(days=595),
+                    support_by=now - timedelta(days=317),
+                ),
+            },
+            packages={
+                "numpy": {
+                    "1.25": VersionSchedule(
+                        version="1.25",
+                        release_date=now - timedelta(days=600),
+                        drop_date=now + timedelta(days=130),
+                        support_by=now - timedelta(days=417),
+                    ),
+                    "2.0": VersionSchedule(
+                        version="2.0",
+                        release_date=now - timedelta(days=200),
+                        drop_date=now + timedelta(days=530),
+                        support_by=now - timedelta(days=17),
+                    ),
+                },
+                "xarray": {
+                    "2024.2": VersionSchedule(
+                        version="2024.2",
+                        release_date=now - timedelta(days=300),
+                        drop_date=now + timedelta(days=430),
+                        support_by=now - timedelta(days=117),
+                    ),
+                    "2024.5": VersionSchedule(
+                        version="2024.5",
+                        release_date=now - timedelta(days=100),
+                        drop_date=now + timedelta(days=630),
+                        support_by=now + timedelta(days=83),
+                    ),
+                },
+            },
+        )
+
+    def test_error_becomes_warning_when_package_ignored(self, schedule):
+        """Test that errors become warnings for packages in ignore_errors_for."""
+        content = """
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=2.0",
+]
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+            f.write(content)
+            f.flush()
+
+            # Without ignore_errors_for: should fail with error
+            reporter_without = Reporter()
+            passed_without = check_compliance(
+                f.name, schedule, reporter_without, use_uv_fallback=False
+            )
+            assert passed_without is False
+            assert reporter_without.has_errors
+
+            # With ignore_errors_for: should pass with warning instead
+            reporter_with = Reporter()
+            passed_with = check_compliance(
+                f.name,
+                schedule,
+                reporter_with,
+                use_uv_fallback=False,
+                ignore_errors_for={"numpy"},
+            )
+            assert passed_with is True
+            assert not reporter_with.has_errors
+            # The error should now be a warning
+            numpy_warnings = [w for w in reporter_with.warnings if w.package == "numpy"]
+            assert len(numpy_warnings) >= 1
+            assert any("drops support" in w.message for w in numpy_warnings)
+
+    def test_check_passes_when_all_errors_ignored(self, schedule):
+        """Test that check passes when all erroring packages are in ignore_errors_for."""
+        content = """
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = [
+    "xarray>=2024.5",
+]
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+            f.write(content)
+            f.flush()
+
+            reporter = Reporter()
+            passed = check_compliance(
+                f.name,
+                schedule,
+                reporter,
+                use_uv_fallback=False,
+                ignore_errors_for={"xarray"},
+            )
+
+            # Should pass - xarray error converted to warning
+            assert passed is True
+            assert not reporter.has_errors
+            # Should have warning for xarray
+            xarray_warnings = [w for w in reporter.warnings if w.package == "xarray"]
+            assert len(xarray_warnings) >= 1
+
+    def test_non_ignored_packages_still_error(self, schedule):
+        """Test that packages not in ignore_errors_for still produce errors."""
+        content = """
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=2.0",
+    "xarray>=2024.5",
+]
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+            f.write(content)
+            f.flush()
+
+            reporter = Reporter()
+            # Only ignore xarray, not numpy
+            passed = check_compliance(
+                f.name,
+                schedule,
+                reporter,
+                use_uv_fallback=False,
+                ignore_errors_for={"xarray"},
+            )
+
+            # Should fail - numpy still errors
+            assert passed is False
+            assert reporter.has_errors
+            # numpy should have error
+            numpy_errors = [e for e in reporter.errors if e.package == "numpy"]
+            assert len(numpy_errors) >= 1
+            # xarray should have warning, not error
+            xarray_errors = [e for e in reporter.errors if e.package == "xarray"]
+            assert len(xarray_errors) == 0
+            xarray_warnings = [w for w in reporter.warnings if w.package == "xarray"]
+            assert len(xarray_warnings) >= 1
+
+    def test_case_insensitive_matching(self, schedule):
+        """Test that package name matching is case-insensitive."""
+        content = """
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = [
+    "NumPy>=2.0",
+]
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+            f.write(content)
+            f.flush()
+
+            reporter = Reporter()
+            # ignore_errors_for uses lowercase
+            passed = check_compliance(
+                f.name,
+                schedule,
+                reporter,
+                use_uv_fallback=False,
+                ignore_errors_for={"numpy"},  # lowercase
+            )
+
+            # Should pass - case-insensitive matching
+            assert passed is True
+            assert not reporter.has_errors
+
+    def test_multiple_packages_ignored(self, schedule):
+        """Test that multiple packages can be ignored."""
+        content = """
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=2.0",
+    "xarray>=2024.5",
+]
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+            f.write(content)
+            f.flush()
+
+            reporter = Reporter()
+            passed = check_compliance(
+                f.name,
+                schedule,
+                reporter,
+                use_uv_fallback=False,
+                ignore_errors_for={"numpy", "xarray"},
+            )
+
+            # Should pass - both packages ignored
+            assert passed is True
+            assert not reporter.has_errors
+            # Both should have warnings
+            numpy_warnings = [w for w in reporter.warnings if w.package == "numpy"]
+            xarray_warnings = [w for w in reporter.warnings if w.package == "xarray"]
+            assert len(numpy_warnings) >= 1
+            assert len(xarray_warnings) >= 1
+
+    def test_empty_ignore_list_has_no_effect(self, schedule):
+        """Test that empty ignore_errors_for behaves same as None."""
+        content = """
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=2.0",
+]
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+            f.write(content)
+            f.flush()
+
+            reporter_none = Reporter()
+            passed_none = check_compliance(
+                f.name,
+                schedule,
+                reporter_none,
+                use_uv_fallback=False,
+                ignore_errors_for=None,
+            )
+
+            reporter_empty = Reporter()
+            passed_empty = check_compliance(
+                f.name,
+                schedule,
+                reporter_empty,
+                use_uv_fallback=False,
+                ignore_errors_for=set(),
+            )
+
+            # Both should fail with errors
+            assert passed_none is False
+            assert passed_empty is False
+            assert reporter_none.has_errors
+            assert reporter_empty.has_errors
+
+    def test_extras_always_warn_regardless_of_ignore(self, schedule):
+        """Test that extras violations are warnings regardless of ignore_errors_for."""
+        content = """
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["numpy>=2.0"]
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+            f.write(content)
+            f.flush()
+
+            # Without ignore_errors_for - extras are still warnings
+            reporter = Reporter()
+            passed = check_compliance(
+                f.name, schedule, reporter, use_uv_fallback=False
+            )
+
+            assert passed is True
+            assert not reporter.has_errors
+            # numpy in extras should be a warning
+            numpy_warnings = [w for w in reporter.warnings if w.package == "numpy"]
+            assert len(numpy_warnings) >= 1
+            assert any(w.context == "dev" for w in numpy_warnings)
+
+
+class TestIgnoreErrorsForCLI:
+    """Tests for --ignore-errors-for CLI argument parsing."""
+
+    @pytest.fixture
+    def schedule_file(self, tmp_path):
+        """Create a test schedule file."""
+        now = datetime.now(timezone.utc)
+        schedule = Schedule(
+            generated_at=now,
+            python={
+                "3.10": VersionSchedule(
+                    version="3.10",
+                    release_date=now - timedelta(days=800),
+                    drop_date=now + timedelta(days=295),
+                    support_by=now - timedelta(days=617),
+                ),
+            },
+            packages={
+                "numpy": {
+                    "1.25": VersionSchedule(
+                        version="1.25",
+                        release_date=now - timedelta(days=600),
+                        drop_date=now + timedelta(days=130),
+                        support_by=now - timedelta(days=417),
+                    ),
+                },
+            },
+        )
+        schedule_path = tmp_path / "schedule.json"
+        with open(schedule_path, "w") as f:
+            json.dump(schedule.to_dict(), f)
+        return schedule_path
+
+    def test_cli_parses_ignore_errors_for_single(self, tmp_path, schedule_file, monkeypatch):
+        """Test CLI correctly parses single package in --ignore-errors-for."""
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text("""
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = ["numpy>=2.0"]
+""")
+        captured_kwargs = {}
+
+        def fake_check_pyproject(**kwargs):
+            captured_kwargs.update(kwargs)
+            return True, Reporter()
+
+        monkeypatch.setattr(phep3_main, "check_pyproject", fake_check_pyproject)
+
+        exit_code = phep3_main.main([
+            str(pyproject),
+            "--schedule", str(schedule_file),
+            "--ignore-errors-for", "numpy",
+            "--no-uv-fallback",
+        ])
+
+        assert exit_code == 0
+        assert "ignore_errors_for" in captured_kwargs
+        assert captured_kwargs["ignore_errors_for"] == {"numpy"}
+
+    def test_cli_parses_ignore_errors_for_multiple(self, tmp_path, schedule_file, monkeypatch):
+        """Test CLI correctly parses multiple packages in --ignore-errors-for."""
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text("""
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = []
+""")
+        captured_kwargs = {}
+
+        def fake_check_pyproject(**kwargs):
+            captured_kwargs.update(kwargs)
+            return True, Reporter()
+
+        monkeypatch.setattr(phep3_main, "check_pyproject", fake_check_pyproject)
+
+        exit_code = phep3_main.main([
+            str(pyproject),
+            "--schedule", str(schedule_file),
+            "--ignore-errors-for", "numpy, xarray, scipy",
+            "--no-uv-fallback",
+        ])
+
+        assert exit_code == 0
+        assert "ignore_errors_for" in captured_kwargs
+        assert captured_kwargs["ignore_errors_for"] == {"numpy", "xarray", "scipy"}
+
+    def test_cli_normalizes_package_names_to_lowercase(self, tmp_path, schedule_file, monkeypatch):
+        """Test CLI normalizes package names to lowercase."""
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text("""
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = []
+""")
+        captured_kwargs = {}
+
+        def fake_check_pyproject(**kwargs):
+            captured_kwargs.update(kwargs)
+            return True, Reporter()
+
+        monkeypatch.setattr(phep3_main, "check_pyproject", fake_check_pyproject)
+
+        exit_code = phep3_main.main([
+            str(pyproject),
+            "--schedule", str(schedule_file),
+            "--ignore-errors-for", "NumPy, XArray",
+            "--no-uv-fallback",
+        ])
+
+        assert exit_code == 0
+        assert "ignore_errors_for" in captured_kwargs
+        assert captured_kwargs["ignore_errors_for"] == {"numpy", "xarray"}
+
+    def test_cli_empty_ignore_errors_for_is_empty_set(self, tmp_path, schedule_file, monkeypatch):
+        """Test CLI with empty --ignore-errors-for produces empty set."""
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text("""
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = []
+""")
+        captured_kwargs = {}
+
+        def fake_check_pyproject(**kwargs):
+            captured_kwargs.update(kwargs)
+            return True, Reporter()
+
+        monkeypatch.setattr(phep3_main, "check_pyproject", fake_check_pyproject)
+
+        exit_code = phep3_main.main([
+            str(pyproject),
+            "--schedule", str(schedule_file),
+            "--no-uv-fallback",
+        ])
+
+        assert exit_code == 0
+        assert "ignore_errors_for" in captured_kwargs
+        assert captured_kwargs["ignore_errors_for"] == set()
+
+    def test_cli_handles_whitespace_in_package_list(self, tmp_path, schedule_file, monkeypatch):
+        """Test CLI correctly handles whitespace in package list."""
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text("""
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = []
+""")
+        captured_kwargs = {}
+
+        def fake_check_pyproject(**kwargs):
+            captured_kwargs.update(kwargs)
+            return True, Reporter()
+
+        monkeypatch.setattr(phep3_main, "check_pyproject", fake_check_pyproject)
+
+        exit_code = phep3_main.main([
+            str(pyproject),
+            "--schedule", str(schedule_file),
+            "--ignore-errors-for", "  numpy  ,  xarray  ,  ",  # extra whitespace and trailing comma
+            "--no-uv-fallback",
+        ])
+
+        assert exit_code == 0
+        assert "ignore_errors_for" in captured_kwargs
+        assert captured_kwargs["ignore_errors_for"] == {"numpy", "xarray"}

@@ -1,12 +1,12 @@
 """Tests for PyHC environment fetcher module."""
 
-import pytest
 import tempfile
 from pathlib import Path
 
 from pyhc_actions.env_compat.fetcher import (
     get_package_from_pyproject,
-    parse_requirements_for_uv,
+    load_pyhc_constraints,
+    parse_package_specs_for_uv,
 )
 
 
@@ -123,10 +123,10 @@ class TestGetPackageFromPyproject:
             assert Path(result).is_absolute()
 
 
-class TestParseRequirementsForUVEditable:
-    """Tests for parse_requirements_for_uv handling of editable installs.
+class TestParsePackageSpecsForUVEditable:
+    """Tests for parse_package_specs_for_uv handling of editable installs.
 
-    When we write -e /path/to/package to a temp requirements file,
+    When we write -e /path/to/package to a temp package-spec file,
     the parsing function should skip it (it's for resolution input,
     not output). This verifies the skip behavior.
     """
@@ -140,7 +140,7 @@ scipy>=1.7
 -e .
 matplotlib>=3.5
 """
-        result = parse_requirements_for_uv(text)
+        result = parse_package_specs_for_uv(text)
 
         # Should only include the regular packages, not -e lines
         assert len(result) == 3
@@ -160,9 +160,23 @@ numpy>=1.20
 ../parent/path
 scipy>=1.7
 """
-        result = parse_requirements_for_uv(text)
+        result = parse_package_specs_for_uv(text)
 
         # Should only include the regular packages
         assert len(result) == 2
         assert "numpy>=1.20" in result
         assert "scipy>=1.7" in result
+
+
+def test_load_pyhc_constraints_from_local_file(tmp_path):
+    constraints = tmp_path / "constraints.txt"
+    constraints.write_text(
+        """
+# comment
+numpy!=2.0.0
+scipy<1.16
+"""
+    )
+
+    result = load_pyhc_constraints(constraints)
+    assert result == ["numpy!=2.0.0", "scipy<1.16"]

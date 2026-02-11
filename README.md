@@ -38,6 +38,7 @@ jobs:
 | `check-adoption` | Check 6-month adoption rule | `true` |
 | `schedule-path` | Path to schedule.json | (auto-download) |
 | `use-uv-fallback` | Use uv for metadata extraction from legacy formats | `true` |
+| `ignore-errors-for` | Comma-separated package names whose errors should be reported as warnings | `""` |
 
 #### Outputs
 
@@ -101,7 +102,8 @@ jobs:
 | Input | Description | Default |
 |-------|-------------|---------|
 | `project-file` | Path to pyproject.toml | `pyproject.toml` |
-| `pyhc-requirements-url` | URL to PyHC requirements.txt | (official GitHub URL) |
+| `pyhc-packages-url` | URL to PyHC packages.txt | (official GitHub URL) |
+| `pyhc-constraints-url` | URL to PyHC constraints.txt | (official GitHub URL) |
 | `extras` | Extras selection: `auto`, `none`, or comma-separated list | `auto` |
 
 #### Outputs
@@ -145,6 +147,9 @@ phep3-check path/to/project
 # Disable uv fallback
 phep3-check --no-uv-fallback pyproject.toml
 
+# Downgrade errors to warnings for specific packages
+phep3-check --ignore-errors-for xarray pyproject.toml
+
 # Run PyHC Environment compatibility check (requires uv)
 pyhc-env-compat-check pyproject.toml
 
@@ -153,8 +158,9 @@ pyhc-env-compat-check --extras auto pyproject.toml
 pyhc-env-compat-check --extras none pyproject.toml
 pyhc-env-compat-check --extras mth5,vires pyproject.toml
 
-# Use a local requirements.txt or alternate URL
-pyhc-env-compat-check --requirements ./requirements.txt pyproject.toml
+# Use local packages/constraints files or alternate URLs
+pyhc-env-compat-check --packages ./packages.txt pyproject.toml
+pyhc-env-compat-check --constraints ./constraints.txt pyproject.toml
 
 # Only check that uv is installed
 pyhc-env-compat-check --check-uv
