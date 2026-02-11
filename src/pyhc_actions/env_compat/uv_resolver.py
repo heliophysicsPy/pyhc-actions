@@ -316,7 +316,6 @@ def check_compatibility(
     # (avoid conflict with package checking itself)
     package_name = None
     try:
-        from pyhc_actions.common.parser import parse_pyproject
         pyproject_data = parse_pyproject(pyproject_path)
         package_name = pyproject_data.get("project", {}).get("name")
     except Exception:
@@ -440,7 +439,6 @@ def check_compatibility(
         # Check if error is due to package resolution issues (not on PyPI, no wheels, build issues)
         # Extract package name from pyproject.toml
         try:
-            from pyhc_actions.common.parser import parse_pyproject
             pyproject_data = parse_pyproject(pyproject_path)
             package_name = pyproject_data.get("project", {}).get("name")
         except Exception:
