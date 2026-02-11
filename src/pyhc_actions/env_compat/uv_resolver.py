@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 import shutil
 import subprocess
@@ -391,7 +390,6 @@ def check_compatibility(
             text=True,
             # Handle both directory paths (setup.py) and file paths (pyproject.toml)
             cwd=pyproject_path if pyproject_path.is_dir() else pyproject_path.parent,
-            env={**os.environ, "UV_NO_CACHE": "1"},
         )
 
         if result.returncode == 0:

@@ -480,6 +480,43 @@ name = "demo"
         assert "--python-version" in captured["cmd"]
         assert "3.12" in captured["cmd"]
 
+    def test_uv_compile_does_not_force_no_cache(self, tmp_path, monkeypatch):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            """
+[project]
+name = "demo"
+"""
+        )
+
+        captured: dict[str, object] = {}
+
+        class DummyResult:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(cmd, *args, **kwargs):
+            captured["cmd"] = cmd
+            captured["env"] = kwargs.get("env")
+            return DummyResult()
+
+        monkeypatch.setattr("pyhc_actions.env_compat.uv_resolver.find_uv", lambda: "/usr/bin/uv")
+        monkeypatch.setattr("pyhc_actions.env_compat.uv_resolver.subprocess.run", fake_run)
+
+        reporter = Reporter(title="Test", output=StringIO(), github_actions=False)
+        ok, _conflicts = check_compatibility(
+            pyproject_path=pyproject,
+            pyhc_packages=["numpy>=1.20"],
+            pyhc_constraints=[],
+            pyhc_python="3.12.0",
+            reporter=reporter,
+        )
+
+        assert ok is True
+        if isinstance(captured["env"], dict):
+            assert captured["env"].get("UV_NO_CACHE") != "1"
+
     def test_excludes_same_package_when_pyhc_entry_has_extras(self, tmp_path, monkeypatch):
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text(
