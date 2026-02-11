@@ -12,10 +12,14 @@ inputs:
     description: "Path to pyproject.toml file"
     required: false
     default: "pyproject.toml"
-  pyhc-requirements-url:
-    description: "URL to PyHC Environment requirements.txt"
+  pyhc-packages-url:
+    description: "URL to PyHC Environment packages.txt"
     required: false
-    default: "https://raw.githubusercontent.com/heliophysicsPy/pyhc-docker-environment/main/docker/pyhc-environment/contents/requirements.txt"
+    default: "https://raw.githubusercontent.com/heliophysicsPy/pyhc-docker-environment/main-v2/docker/pyhc-environment/contents/packages.txt"
+  pyhc-constraints-url:
+    description: "URL to PyHC Environment constraints.txt"
+    required: false
+    default: "https://raw.githubusercontent.com/heliophysicsPy/pyhc-docker-environment/main-v2/docker/pyhc-environment/contents/constraints.txt"
   extras:
     description: "Extras selection: auto | none | comma-separated list (e.g., mth5,vires)"
     required: false
@@ -72,9 +76,14 @@ runs:
           fi
         fi
 
-        REQUIREMENTS_ARG=""
-        if [ -n "${{ inputs.pyhc-requirements-url }}" ]; then
-          REQUIREMENTS_ARG="--requirements ${{ inputs.pyhc-requirements-url }}"
+        PACKAGES_ARG=""
+        if [ -n "${{ inputs.pyhc-packages-url }}" ]; then
+          PACKAGES_ARG="--packages ${{ inputs.pyhc-packages-url }}"
+        fi
+
+        CONSTRAINTS_ARG=""
+        if [ -n "${{ inputs.pyhc-constraints-url }}" ]; then
+          CONSTRAINTS_ARG="--constraints ${{ inputs.pyhc-constraints-url }}"
         fi
 
         EXTRAS_ARG=""
@@ -82,7 +91,7 @@ runs:
           EXTRAS_ARG="--extras ${{ inputs.extras }}"
         fi
 
-        python -m pyhc_actions.env_compat.main $REQUIREMENTS_ARG $EXTRAS_ARG "${{ inputs.project-file }}"
+        python -m pyhc_actions.env_compat.main $PACKAGES_ARG $CONSTRAINTS_ARG $EXTRAS_ARG "${{ inputs.project-file }}"
         EXIT_CODE=$?
 
         if [ $EXIT_CODE -eq 0 ]; then

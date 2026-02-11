@@ -1,44 +1,46 @@
-"""Fetch PyHC Environment requirements."""
+"""Fetch PyHC Environment package and constraint files."""
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Callable
 
 import requests
 import yaml
 
-if TYPE_CHECKING:
-    pass
-
-
-# Default URL to PyHC Environment requirements.txt
-PYHC_REQUIREMENTS_URL = (
+# Default URL to PyHC Environment packages.txt
+PYHC_PACKAGES_URL = (
     "https://raw.githubusercontent.com/heliophysicsPy/pyhc-docker-environment/"
-    "main/docker/pyhc-environment/contents/requirements.txt"
+    "main-v2/docker/pyhc-environment/contents/packages.txt"
+)
+
+# Default URL to PyHC Environment constraints.txt
+PYHC_CONSTRAINTS_URL = (
+    "https://raw.githubusercontent.com/heliophysicsPy/pyhc-docker-environment/"
+    "main-v2/docker/pyhc-environment/contents/constraints.txt"
 )
 
 # Default URL to PyHC Environment environment.yml (conda environment file)
 PYHC_ENVIRONMENT_YML_URL = (
     "https://raw.githubusercontent.com/heliophysicsPy/pyhc-docker-environment/"
-    "main/docker/pyhc-environment/contents/environment.yml"
+    "main-v2/docker/pyhc-environment/contents/environment.yml"
 )
 
 
-def fetch_pyhc_requirements(url: str | None = None) -> str:
-    """Fetch PyHC Environment requirements.txt content.
+def fetch_pyhc_packages(url: str | None = None) -> str:
+    """Fetch PyHC Environment packages.txt content.
 
     Args:
         url: URL to fetch from (default: official GitHub raw URL)
 
     Returns:
-        Contents of requirements.txt as string
+        Contents of packages.txt as string
 
     Raises:
         requests.RequestException: If fetch fails
     """
-    url = url or PYHC_REQUIREMENTS_URL
+    url = url or PYHC_PACKAGES_URL
 
     response = requests.get(url, timeout=30)
     response.raise_for_status()
@@ -46,20 +48,40 @@ def fetch_pyhc_requirements(url: str | None = None) -> str:
     return response.text
 
 
-def parse_requirements_for_uv(requirements_text: str) -> list[str]:
-    """Parse requirements.txt and return list suitable for uv.
+def fetch_pyhc_constraints(url: str | None = None) -> str:
+    """Fetch PyHC Environment constraints.txt content.
+
+    Args:
+        url: URL to fetch from (default: official GitHub raw URL)
+
+    Returns:
+        Contents of constraints.txt as string
+
+    Raises:
+        requests.RequestException: If fetch fails
+    """
+    url = url or PYHC_CONSTRAINTS_URL
+
+    response = requests.get(url, timeout=30)
+    response.raise_for_status()
+
+    return response.text
+
+
+def parse_package_specs_for_uv(raw_text: str) -> list[str]:
+    """Parse package-spec text and return entries suitable for uv.
 
     Filters out comments, blank lines, and incompatible lines.
 
     Args:
-        requirements_text: Raw requirements.txt content
+        raw_text: Raw text from packages.txt or constraints.txt
 
     Returns:
-        List of requirement strings
+        List of package spec strings
     """
-    requirements = []
+    package_specs = []
 
-    for line in requirements_text.split("\n"):
+    for line in raw_text.split("\n"):
         line = line.strip()
 
         # Skip empty lines and comments
@@ -74,39 +96,57 @@ def parse_requirements_for_uv(requirements_text: str) -> list[str]:
         if line.startswith(".") or line.startswith("/"):
             continue
 
-        requirements.append(line)
+        package_specs.append(line)
 
-    return requirements
+    return package_specs
 
 
-def load_pyhc_requirements(
-    source: str | Path | None = None,
-) -> list[str]:
-    """Load PyHC requirements from URL or local file.
-
-    Args:
-        source: URL or path to requirements file (None uses default URL)
-
-    Returns:
-        List of requirement strings
-    """
+def _load_from_source(
+    source: str | Path | None,
+    fetcher: Callable[[str | None], str],
+) -> str:
+    """Load text from URL or local file."""
     if source is None:
-        # Fetch from default URL
-        text = fetch_pyhc_requirements()
-    elif isinstance(source, Path) or (isinstance(source, str) and not source.startswith("http")):
-        # Load from local file
+        return fetcher()
+
+    if isinstance(source, Path) or (
+        isinstance(source, str) and not source.startswith("http")
+    ):
         path = Path(source)
         with open(path) as f:
-            text = f.read()
-    else:
-        # Fetch from URL
-        text = fetch_pyhc_requirements(str(source))
+            return f.read()
 
-    return parse_requirements_for_uv(text)
+    return fetcher(str(source))
+
+
+def load_pyhc_packages(source: str | Path | None = None) -> list[str]:
+    """Load PyHC packages from URL or local file.
+
+    Args:
+        source: URL or path to packages file (None uses default URL)
+
+    Returns:
+        List of package spec strings
+    """
+    text = _load_from_source(source, fetch_pyhc_packages)
+    return parse_package_specs_for_uv(text)
+
+
+def load_pyhc_constraints(source: str | Path | None = None) -> list[str]:
+    """Load PyHC constraints from URL or local file.
+
+    Args:
+        source: URL or path to constraints file (None uses default URL)
+
+    Returns:
+        List of constraint spec strings
+    """
+    text = _load_from_source(source, fetch_pyhc_constraints)
+    return parse_package_specs_for_uv(text)
 
 
 def get_package_from_pyproject(pyproject_path: Path | str) -> str:
-    """Get package directory path for use in requirements.
+    """Get package directory path for local editable install specs.
 
     Handles both file paths (pyproject.toml) and directory paths (for setup.py
     packages where main.py passes the project directory directly).

@@ -10,13 +10,16 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import SpecifierSet, InvalidSpecifier
+from packaging.utils import canonicalize_name
 from packaging.version import Version, InvalidVersion
 
 from pyhc_actions.common.reporter import Reporter
 from pyhc_actions.common.parser import parse_pyproject
 from pyhc_actions.env_compat.fetcher import (
-    load_pyhc_requirements,
+    load_pyhc_packages,
+    load_pyhc_constraints,
     get_package_from_pyproject,
     get_pyhc_python_version,
 )
@@ -26,6 +29,52 @@ def _normalize_spec(spec: str) -> str:
     """Normalize version specifier by trimming whitespace and trailing punctuation."""
     spec = spec.strip()
     return spec.rstrip(".,;")
+
+
+def _canonicalize_package_name(name: str | None) -> str | None:
+    """Canonicalize a package name for robust comparisons.
+
+    Uses PEP 503 normalization semantics via packaging utilities.
+    """
+    if not name:
+        return None
+    return canonicalize_name(name)
+
+
+def _extract_canonical_name_from_spec(spec: str) -> str | None:
+    """Extract canonical package name from a requirement-like spec string.
+
+    Handles extras (e.g., ``pyhc-core[tests]==0.0.7``), direct references,
+    and versioned/unversioned requirements.
+    """
+    try:
+        return canonicalize_name(Requirement(spec).name)
+    except InvalidRequirement:
+        # Fallback for non-standard lines: strip known operators and extras.
+        base = (
+            spec.split("==")[0]
+            .split(">=")[0]
+            .split("<=")[0]
+            .split("!=")[0]
+            .split("~=")[0]
+            .split(">")[0]
+            .split("<")[0]
+            .split("[")[0]
+            .split("@")[0]
+            .strip()
+        )
+        return canonicalize_name(base) if base else None
+
+
+def _python_version_for_uv(pyhc_python: str | None) -> str | None:
+    """Convert Python version to uv-compatible major.minor form."""
+    if not pyhc_python:
+        return None
+    try:
+        parsed = Version(pyhc_python)
+    except InvalidVersion:
+        return None
+    return f"{parsed.major}.{parsed.minor}"
 
 
 def parse_resolved_versions(uv_output: str) -> dict[str, str]:
@@ -145,8 +194,10 @@ def find_uv() -> str | None:
 
 def check_compatibility(
     pyproject_path: Path | str,
-    pyhc_requirements_source: str | Path | None = None,
-    pyhc_requirements: list[str] | None = None,
+    pyhc_packages_source: str | Path | None = None,
+    pyhc_packages: list[str] | None = None,
+    pyhc_constraints_source: str | Path | None = None,
+    pyhc_constraints: list[str] | None = None,
     pyhc_python: str | None = None,
     extra: str | None = None,
     context: str = "",
@@ -157,8 +208,10 @@ def check_compatibility(
 
     Args:
         pyproject_path: Path to pyproject.toml
-        pyhc_requirements_source: URL or path to PyHC requirements
-        pyhc_requirements: Pre-loaded PyHC requirements list (skips fetching)
+        pyhc_packages_source: URL or path to PyHC packages
+        pyhc_packages: Pre-loaded PyHC packages list (skips fetching)
+        pyhc_constraints_source: URL or path to PyHC constraints
+        pyhc_constraints: Pre-loaded PyHC constraints list (skips fetching)
         pyhc_python: Pre-loaded PyHC Python version (skips fetching)
         extra: Optional extra group to install (e.g., "image")
         context: Optional context label for reporting (e.g., "base", "image")
@@ -235,21 +288,32 @@ def check_compatibility(
         )
         return False, []
 
-    # Load PyHC requirements
-    if pyhc_requirements is None:
+    # Load PyHC packages
+    if pyhc_packages is None:
         try:
-            pyhc_requirements = load_pyhc_requirements(pyhc_requirements_source)
+            pyhc_packages = load_pyhc_packages(pyhc_packages_source)
         except Exception as e:
             _report_error(
-                package="pyhc-requirements",
-                message=f"Failed to load PyHC requirements: {e}",
+                package="pyhc-packages",
+                message=f"Failed to load PyHC packages: {e}",
+            )
+            return False, []
+
+    # Load PyHC constraints
+    if pyhc_constraints is None:
+        try:
+            pyhc_constraints = load_pyhc_constraints(pyhc_constraints_source)
+        except Exception as e:
+            _report_error(
+                package="pyhc-constraints",
+                message=f"Failed to load PyHC constraints: {e}",
             )
             return False, []
 
     # Get package path for local install
     package_path = get_package_from_pyproject(pyproject_path)
 
-    # Get package name to filter from PyHC requirements
+    # Get package name to filter from PyHC packages
     # (avoid conflict with package checking itself)
     package_name = None
     try:
@@ -269,19 +333,25 @@ def check_compatibility(
                 package_name = metadata.name
         except Exception:
             pass
+    package_name_canonical = _canonicalize_package_name(package_name)
 
-    # Create temporary requirements file combining both
+    temp_constraints: str | None = None
+
+    # Create temporary package list file combining both
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".txt", delete=False
     ) as f:
-        # Write PyHC requirements, excluding the package being checked
-        for req in pyhc_requirements:
-            # Parse requirement to extract package name
-            # Handle formats like: "package==1.0", "package>=1.0", "package", etc.
-            req_package_name = req.split("==")[0].split(">=")[0].split("<=")[0].split("!=")[0].split("~=")[0].split(">")[0].split("<")[0].strip()
+        # Write PyHC packages, excluding the package being checked
+        for req in pyhc_packages:
+            # Parse requirement to extract canonical package name.
+            req_package_name = _extract_canonical_name_from_spec(req)
 
             # Skip if this is the package being checked
-            if package_name and req_package_name.lower() == package_name.lower():
+            if (
+                package_name_canonical
+                and req_package_name
+                and req_package_name == package_name_canonical
+            ):
                 continue
 
             f.write(f"{req}\n")
@@ -292,18 +362,31 @@ def check_compatibility(
             editable_spec = f"-e {package_path}[{extra}]"
         f.write(f"{editable_spec}\n")
 
-        temp_requirements = f.name
+        temp_packages = f.name
+
+    if pyhc_constraints:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            for constraint in pyhc_constraints:
+                f.write(f"{constraint}\n")
+            temp_constraints = f.name
 
     try:
-        # Run uv pip compile to check if resolution is possible
+        # Run uv pip compile to check if resolution is possible.
+        command = [
+            uv_path,
+            "pip",
+            "compile",
+            "--no-config",
+        ]
+        uv_python_version = _python_version_for_uv(pyhc_python)
+        if uv_python_version:
+            command.extend(["--python-version", uv_python_version])
+        command.append(temp_packages)
+        if temp_constraints:
+            command.extend(["-c", temp_constraints])
+
         result = subprocess.run(
-            [
-                uv_path,
-                "pip",
-                "compile",
-                "--no-config",
-                temp_requirements,
-            ],
+            command,
             capture_output=True,
             text=True,
             # Handle both directory paths (setup.py) and file paths (pyproject.toml)
@@ -317,7 +400,9 @@ def check_compatibility(
 
             # Add the package being checked (uv doesn't output editable installs)
             if package_name:
-                resolved[package_name.lower()] = f"{package_name} @ {package_path}"
+                resolved[_canonicalize_package_name(package_name) or package_name.lower()] = (
+                    f"{package_name} @ {package_path}"
+                )
 
             if resolved:
                 reporter.print(f"\n\nResolved Package Versions [{context}]:")
@@ -422,8 +507,10 @@ def check_compatibility(
         return False, conflicts
 
     finally:
-        # Clean up temp file
-        Path(temp_requirements).unlink(missing_ok=True)
+        # Clean up temp files
+        Path(temp_packages).unlink(missing_ok=True)
+        if temp_constraints:
+            Path(temp_constraints).unlink(missing_ok=True)
 
 
 def _is_platform_specific_error(stderr: str) -> bool:
@@ -805,7 +892,7 @@ def _extract_error_summary(stderr: str) -> str:
 
 def run_uv_lock_check(
     pyproject_path: Path | str,
-    pyhc_requirements: list[str],
+    pyhc_packages: list[str],
     reporter: Reporter | None = None,
 ) -> tuple[bool, str]:
     """Alternative check using uv lock with a temporary project.
@@ -815,7 +902,7 @@ def run_uv_lock_check(
 
     Args:
         pyproject_path: Path to the package's pyproject.toml
-        pyhc_requirements: List of PyHC requirements
+        pyhc_packages: List of PyHC package specs
         reporter: Optional reporter
 
     Returns:
@@ -838,7 +925,7 @@ def run_uv_lock_check(
                 "requires-python": ">=3.11",
                 "dependencies": [
                     str(pyproject_path.parent.resolve()),  # The package being checked
-                    *pyhc_requirements,  # All PyHC packages
+                    *pyhc_packages,  # All PyHC packages
                 ],
             }
         }

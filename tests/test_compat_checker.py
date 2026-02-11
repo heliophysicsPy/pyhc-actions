@@ -1,8 +1,8 @@
 """Tests for PyHC compatibility checker."""
 
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from io import StringIO
+from pathlib import Path
 
 from pyhc_actions.env_compat.uv_resolver import (
     parse_uv_error,
@@ -17,23 +17,23 @@ from pyhc_actions.env_compat.uv_resolver import (
     check_compatibility,
 )
 from pyhc_actions.env_compat.fetcher import (
-    parse_requirements_for_uv,
+    parse_package_specs_for_uv,
     parse_python_version_from_env_yml,
 )
 from pyhc_actions.common.reporter import Reporter
 
 
-class TestParseRequirementsForUV:
-    """Tests for parsing requirements.txt."""
+class TestParsePackageSpecsForUV:
+    """Tests for parsing package-spec files."""
 
-    def test_simple_requirements(self):
-        """Test parsing simple requirements."""
+    def test_simple_package_specs(self):
+        """Test parsing simple package specs."""
         text = """
 numpy>=1.20
 scipy>=1.7
 matplotlib>=3.5
 """
-        result = parse_requirements_for_uv(text)
+        result = parse_package_specs_for_uv(text)
         assert len(result) == 3
         assert "numpy>=1.20" in result
         assert "scipy>=1.7" in result
@@ -46,7 +46,7 @@ numpy>=1.20
 # Another comment
 scipy>=1.7
 """
-        result = parse_requirements_for_uv(text)
+        result = parse_package_specs_for_uv(text)
         assert len(result) == 2
         assert "numpy>=1.20" in result
 
@@ -59,7 +59,7 @@ numpy>=1.20
 --index-url https://pypi.org/simple
 scipy>=1.7
 """
-        result = parse_requirements_for_uv(text)
+        result = parse_package_specs_for_uv(text)
         assert len(result) == 2
         assert "numpy>=1.20" in result
         assert "scipy>=1.7" in result
@@ -73,7 +73,7 @@ numpy>=1.20
 scipy>=1.7
 
 """
-        result = parse_requirements_for_uv(text)
+        result = parse_package_specs_for_uv(text)
         assert len(result) == 2
 
 
@@ -305,7 +305,8 @@ name = "demo"
         reporter = Reporter(title="Test", output=StringIO(), github_actions=False)
         ok, _conflicts = check_compatibility(
             pyproject_path=pyproject,
-            pyhc_requirements=[],
+            pyhc_packages=[],
+            pyhc_constraints=[],
             pyhc_python="3.12.0",
             report_as_warning=True,
             context="doc",
@@ -372,6 +373,155 @@ name = "demo"
         conflicts = parse_uv_error(stderr)
         assert len(conflicts) == 1
         assert conflicts[0].package == "numpy"
+
+    def test_constraints_are_passed_to_uv_compile(self, tmp_path, monkeypatch):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            """
+[project]
+name = "demo"
+"""
+        )
+
+        captured: dict[str, list[str]] = {}
+
+        class DummyResult:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(cmd, *args, **kwargs):
+            captured["cmd"] = cmd
+            return DummyResult()
+
+        monkeypatch.setattr("pyhc_actions.env_compat.uv_resolver.find_uv", lambda: "/usr/bin/uv")
+        monkeypatch.setattr("pyhc_actions.env_compat.uv_resolver.subprocess.run", fake_run)
+
+        reporter = Reporter(title="Test", output=StringIO(), github_actions=False)
+        ok, _conflicts = check_compatibility(
+            pyproject_path=pyproject,
+            pyhc_packages=["numpy>=1.20"],
+            pyhc_constraints=["numpy!=2.0.0"],
+            pyhc_python="3.12.0",
+            reporter=reporter,
+        )
+
+        assert ok is True
+        assert "-c" in captured["cmd"]
+
+    def test_empty_constraints_not_passed_to_uv_compile(self, tmp_path, monkeypatch):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            """
+[project]
+name = "demo"
+"""
+        )
+
+        captured: dict[str, list[str]] = {}
+
+        class DummyResult:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(cmd, *args, **kwargs):
+            captured["cmd"] = cmd
+            return DummyResult()
+
+        monkeypatch.setattr("pyhc_actions.env_compat.uv_resolver.find_uv", lambda: "/usr/bin/uv")
+        monkeypatch.setattr("pyhc_actions.env_compat.uv_resolver.subprocess.run", fake_run)
+
+        reporter = Reporter(title="Test", output=StringIO(), github_actions=False)
+        ok, _conflicts = check_compatibility(
+            pyproject_path=pyproject,
+            pyhc_packages=["numpy>=1.20"],
+            pyhc_constraints=[],
+            pyhc_python="3.12.0",
+            reporter=reporter,
+        )
+
+        assert ok is True
+        assert "-c" not in captured["cmd"]
+
+    def test_python_version_passed_to_uv_compile(self, tmp_path, monkeypatch):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            """
+[project]
+name = "demo"
+"""
+        )
+
+        captured: dict[str, list[str]] = {}
+
+        class DummyResult:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(cmd, *args, **kwargs):
+            captured["cmd"] = cmd
+            return DummyResult()
+
+        monkeypatch.setattr("pyhc_actions.env_compat.uv_resolver.find_uv", lambda: "/usr/bin/uv")
+        monkeypatch.setattr("pyhc_actions.env_compat.uv_resolver.subprocess.run", fake_run)
+
+        reporter = Reporter(title="Test", output=StringIO(), github_actions=False)
+        ok, _conflicts = check_compatibility(
+            pyproject_path=pyproject,
+            pyhc_packages=["numpy>=1.20"],
+            pyhc_constraints=[],
+            pyhc_python="3.12.9",
+            reporter=reporter,
+        )
+
+        assert ok is True
+        assert "--python-version" in captured["cmd"]
+        assert "3.12" in captured["cmd"]
+
+    def test_excludes_same_package_when_pyhc_entry_has_extras(self, tmp_path, monkeypatch):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            """
+[project]
+name = "pyhc-core"
+"""
+        )
+
+        captured_requirements: dict[str, str] = {}
+
+        class DummyResult:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(cmd, *args, **kwargs):
+            req_file = None
+            for token in cmd:
+                if isinstance(token, str) and token.endswith(".txt") and Path(token).exists():
+                    req_file = token
+                    break
+            assert req_file is not None
+            with open(req_file) as f:
+                captured_requirements["text"] = f.read()
+            return DummyResult()
+
+        monkeypatch.setattr("pyhc_actions.env_compat.uv_resolver.find_uv", lambda: "/usr/bin/uv")
+        monkeypatch.setattr("pyhc_actions.env_compat.uv_resolver.subprocess.run", fake_run)
+
+        reporter = Reporter(title="Test", output=StringIO(), github_actions=False)
+        ok, _conflicts = check_compatibility(
+            pyproject_path=pyproject,
+            pyhc_packages=["pyhc-core[tests]==0.0.7", "numpy>=1.20"],
+            pyhc_constraints=[],
+            pyhc_python="3.12.9",
+            reporter=reporter,
+        )
+
+        assert ok is True
+        assert "pyhc-core[tests]==0.0.7" not in captured_requirements["text"]
+        assert "numpy>=1.20" in captured_requirements["text"]
 
 
 class TestExtractConflictFromError:
@@ -900,9 +1050,9 @@ setup(
             assert package_path == str(tmpdir_path.resolve())
 
     def test_editable_flag_format(self):
-        """Test that requirements include -e flag for local packages.
+        """Test that package specs include -e flag for local packages.
 
-        This verifies the format used in the temp requirements file.
+        This verifies the format used in the temp package spec file.
         """
         import tempfile
         from pathlib import Path
@@ -910,7 +1060,7 @@ setup(
         with tempfile.TemporaryDirectory() as tmpdir:
             package_path = Path(tmpdir).resolve()
 
-            # The format we write to requirements.txt
+            # The format we write to temporary package specs
             req_line = f"-e {package_path}\n"
 
             # Verify format

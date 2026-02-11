@@ -14,8 +14,10 @@ from pyhc_actions.env_compat.uv_resolver import (
     discover_optional_extras,
 )
 from pyhc_actions.env_compat.fetcher import (
-    PYHC_REQUIREMENTS_URL,
-    load_pyhc_requirements,
+    PYHC_PACKAGES_URL,
+    PYHC_CONSTRAINTS_URL,
+    load_pyhc_packages,
+    load_pyhc_constraints,
     get_pyhc_python_version,
 )
 
@@ -36,7 +38,8 @@ def main(args: list[str] | None = None) -> int:
 Examples:
   %(prog)s                              # Check ./pyproject.toml
   %(prog)s path/to/pyproject.toml       # Check specific file
-  %(prog)s --requirements local.txt     # Use local requirements file
+  %(prog)s --packages local.txt         # Use local packages file
+  %(prog)s --constraints local.txt      # Use local constraints file
         """,
     )
 
@@ -48,10 +51,17 @@ Examples:
     )
 
     parser.add_argument(
-        "--requirements",
-        "-r",
+        "--packages",
+        "-p",
         default=None,
-        help=f"Path or URL to PyHC requirements.txt (default: {PYHC_REQUIREMENTS_URL})",
+        help=f"Path or URL to PyHC packages.txt (default: {PYHC_PACKAGES_URL})",
+    )
+
+    parser.add_argument(
+        "--constraints",
+        "-c",
+        default=None,
+        help=f"Path or URL to PyHC constraints.txt (default: {PYHC_CONSTRAINTS_URL})",
     )
 
     parser.add_argument(
@@ -102,13 +112,25 @@ Examples:
     reporter = Reporter(title="PyHC Environment Compatibility Check")
     reporter.set_file_path(str(project_path))
 
-    # Pre-load PyHC requirements once to avoid repeated downloads
+    # Pre-load PyHC packages once to avoid repeated downloads
     try:
-        pyhc_requirements = load_pyhc_requirements(parsed_args.requirements)
+        pyhc_packages = load_pyhc_packages(parsed_args.packages)
     except Exception as e:
         reporter.add_error(
-            package="pyhc-requirements",
-            message=f"Failed to load PyHC requirements: {e}",
+            package="pyhc-packages",
+            message=f"Failed to load PyHC packages: {e}",
+            context="base",
+        )
+        reporter.print_report()
+        reporter.write_github_summary()
+        return 1
+
+    try:
+        pyhc_constraints = load_pyhc_constraints(parsed_args.constraints)
+    except Exception as e:
+        reporter.add_error(
+            package="pyhc-constraints",
+            message=f"Failed to load PyHC constraints: {e}",
             context="base",
         )
         reporter.print_report()
@@ -150,7 +172,8 @@ Examples:
     # Always run base check
     is_compatible, conflicts = check_compatibility(
         pyproject_path=project_path,
-        pyhc_requirements=pyhc_requirements,
+        pyhc_packages=pyhc_packages,
+        pyhc_constraints=pyhc_constraints,
         pyhc_python=pyhc_python,
         extra=None,
         context="base",
@@ -164,7 +187,8 @@ Examples:
     for extra in extras_to_check:
         is_compatible, conflicts = check_compatibility(
             pyproject_path=project_path,
-            pyhc_requirements=pyhc_requirements,
+            pyhc_packages=pyhc_packages,
+            pyhc_constraints=pyhc_constraints,
             pyhc_python=pyhc_python,
             extra=extra,
             context=extra,

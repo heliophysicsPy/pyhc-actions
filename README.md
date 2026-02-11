@@ -101,7 +101,8 @@ jobs:
 | Input | Description | Default |
 |-------|-------------|---------|
 | `project-file` | Path to pyproject.toml | `pyproject.toml` |
-| `pyhc-requirements-url` | URL to PyHC requirements.txt | (official GitHub URL) |
+| `pyhc-packages-url` | URL to PyHC packages.txt | (official GitHub URL) |
+| `pyhc-constraints-url` | URL to PyHC constraints.txt | (official GitHub URL) |
 | `extras` | Extras selection: `auto`, `none`, or comma-separated list | `auto` |
 
 #### Outputs
@@ -153,8 +154,9 @@ pyhc-env-compat-check --extras auto pyproject.toml
 pyhc-env-compat-check --extras none pyproject.toml
 pyhc-env-compat-check --extras mth5,vires pyproject.toml
 
-# Use a local requirements.txt or alternate URL
-pyhc-env-compat-check --requirements ./requirements.txt pyproject.toml
+# Use local packages/constraints files or alternate URLs
+pyhc-env-compat-check --packages ./packages.txt pyproject.toml
+pyhc-env-compat-check --constraints ./constraints.txt pyproject.toml
 
 # Only check that uv is installed
 pyhc-env-compat-check --check-uv
