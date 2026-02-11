@@ -317,6 +317,48 @@ requires-python = ">=3.7,<3.12"
         assert conflicts[0].package == "python"
         assert len(reporter.errors) == 1
         assert reporter.errors[0].message == "Python version incompatible with PyHC Environment"
+        assert reporter.errors[0].suggestion == "Support Python >=3.12"
+
+    def test_incompatible_requires_python_warning_includes_suggestion(self, tmp_path, monkeypatch):
+        """In extras warning mode, include the same Python support suggestion."""
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            """
+[project]
+name = "demo"
+requires-python = ">=3.7,<3.12"
+"""
+        )
+
+        monkeypatch.setattr(
+            "pyhc_actions.env_compat.uv_resolver.find_uv",
+            lambda: (_ for _ in ()).throw(AssertionError("find_uv should not be called")),
+        )
+        monkeypatch.setattr(
+            "pyhc_actions.env_compat.uv_resolver.subprocess.run",
+            lambda *a, **k: (_ for _ in ()).throw(
+                AssertionError("subprocess.run should not be called")
+            ),
+        )
+
+        reporter = Reporter(title="Test", output=StringIO(), github_actions=False)
+        ok, conflicts = check_compatibility(
+            pyproject_path=pyproject,
+            pyhc_packages=[],
+            pyhc_constraints=[],
+            pyhc_python="3.12.9",
+            report_as_warning=True,
+            context="plots",
+            reporter=reporter,
+        )
+
+        assert ok is False
+        assert len(conflicts) == 1
+        assert conflicts[0].package == "python"
+        assert reporter.errors == []
+        assert len(reporter.warnings) == 1
+        assert reporter.warnings[0].message == "Python version incompatible with PyHC Environment"
+        assert reporter.warnings[0].suggestion == "Support Python >=3.12"
 
     def test_conflicts_reported_as_warnings(self, tmp_path, monkeypatch):
         pyproject = tmp_path / "pyproject.toml"

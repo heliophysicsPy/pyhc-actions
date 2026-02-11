@@ -76,6 +76,16 @@ def _python_version_for_uv(pyhc_python: str | None) -> str | None:
     return f"{parsed.major}.{parsed.minor}"
 
 
+def _python_support_suggestion(pyhc_python: str | None) -> str:
+    """Build a user-facing Python support suggestion from PyHC Python version."""
+    min_python = _python_version_for_uv(pyhc_python)
+    if min_python:
+        return f"Support Python >={min_python}"
+    if pyhc_python:
+        return f"Support Python {pyhc_python}"
+    return "Support Python used by PyHC Environment"
+
+
 def parse_resolved_versions(uv_output: str) -> dict[str, str]:
     """Parse resolved package versions from uv pip compile output.
 
@@ -267,6 +277,7 @@ def check_compatibility(
                 package="python",
                 message="Python version incompatible with PyHC Environment",
                 details=python_error,
+                suggestion=_python_support_suggestion(pyhc_python),
             )
             return False, [
                 Conflict(
