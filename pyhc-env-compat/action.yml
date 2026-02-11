@@ -24,10 +24,6 @@ inputs:
     description: "Extras selection: auto | none | comma-separated list (e.g., mth5,vires)"
     required: false
     default: "auto"
-  max-workers:
-    description: "Maximum workers for extras checks (1 disables parallelization)"
-    required: false
-    default: "2"
 
 outputs:
   compatible:
@@ -95,12 +91,7 @@ runs:
           EXTRAS_ARG="--extras ${{ inputs.extras }}"
         fi
 
-        MAX_WORKERS_ARG=""
-        if [ -n "${{ inputs.max-workers }}" ]; then
-          MAX_WORKERS_ARG="--max-workers ${{ inputs.max-workers }}"
-        fi
-
-        python -m pyhc_actions.env_compat.main $PACKAGES_ARG $CONSTRAINTS_ARG $EXTRAS_ARG $MAX_WORKERS_ARG "${{ inputs.project-file }}"
+        python -m pyhc_actions.env_compat.main $PACKAGES_ARG $CONSTRAINTS_ARG $EXTRAS_ARG "${{ inputs.project-file }}"
         EXIT_CODE=$?
 
         if [ $EXIT_CODE -eq 0 ]; then

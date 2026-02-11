@@ -105,7 +105,6 @@ jobs:
 | `pyhc-packages-url` | URL to PyHC packages.txt | (official GitHub URL) |
 | `pyhc-constraints-url` | URL to PyHC constraints.txt | (official GitHub URL) |
 | `extras` | Extras selection: `auto`, `none`, or comma-separated list | `auto` |
-| `max-workers` | Maximum workers for extras checks (`1` disables parallelization) | `2` |
 
 #### Outputs
 
@@ -158,10 +157,6 @@ pyhc-env-compat-check pyproject.toml
 pyhc-env-compat-check --extras auto pyproject.toml
 pyhc-env-compat-check --extras none pyproject.toml
 pyhc-env-compat-check --extras mth5,vires pyproject.toml
-
-# Tune extras check parallelism
-pyhc-env-compat-check --extras auto --max-workers 4 pyproject.toml
-pyhc-env-compat-check --extras auto --max-workers 1 pyproject.toml  # serial
 
 # Use local packages/constraints files or alternate URLs
 pyhc-env-compat-check --packages ./packages.txt pyproject.toml

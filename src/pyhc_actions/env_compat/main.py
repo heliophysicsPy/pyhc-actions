@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from io import StringIO
 import os
 import sys
 from pathlib import Path
@@ -22,17 +20,6 @@ from pyhc_actions.env_compat.fetcher import (
     load_pyhc_constraints,
     get_pyhc_python_version,
 )
-
-
-def _positive_int(value: str) -> int:
-    """Parse and validate positive integers for CLI arguments."""
-    try:
-        parsed = int(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("must be an integer") from exc
-    if parsed < 1:
-        raise argparse.ArgumentTypeError("must be >= 1")
-    return parsed
 
 
 def main(args: list[str] | None = None) -> int:
@@ -88,15 +75,6 @@ Examples:
         help=(
             "Extras selection: 'auto' (default) runs base + each extra + 'all' if defined; "
             "'none' runs base only; or provide a comma-separated list of extras to check."
-        ),
-    )
-    parser.add_argument(
-        "--max-workers",
-        type=_positive_int,
-        default=2,
-        help=(
-            "Maximum number of workers for extras checks. "
-            "Use 1 to disable parallelization (default: 2)."
         ),
     )
 
@@ -206,15 +184,8 @@ Examples:
     overall_compatible = overall_compatible and is_compatible
 
     # Run per-extra checks
-    def _run_extra_check(extra: str) -> tuple[int, list, str]:
-        extra_output = StringIO()
-        extra_reporter = Reporter(
-            title=reporter.title,
-            github_actions=False,
-            output=extra_output,
-        )
-        extra_reporter.set_file_path(str(project_path))
-        _is_compatible, conflicts = check_compatibility(
+    for extra in extras_to_check:
+        is_compatible, conflicts = check_compatibility(
             pyproject_path=project_path,
             pyhc_packages=pyhc_packages,
             pyhc_constraints=pyhc_constraints,
@@ -222,35 +193,9 @@ Examples:
             extra=extra,
             context=extra,
             report_as_warning=True,
-            reporter=extra_reporter,
+            reporter=reporter,
         )
-        return len(conflicts), extra_reporter.issues, extra_output.getvalue()
-
-    if extras_to_check:
-        worker_count = min(parsed_args.max_workers, len(extras_to_check))
-        extra_results: dict[str, tuple[int, list, str]] = {}
-
-        if worker_count == 1:
-            for extra in extras_to_check:
-                extra_results[extra] = _run_extra_check(extra)
-        else:
-            with ThreadPoolExecutor(max_workers=worker_count) as executor:
-                futures = {
-                    executor.submit(_run_extra_check, extra): extra
-                    for extra in extras_to_check
-                }
-                for future in as_completed(futures):
-                    extra = futures[future]
-                    extra_results[extra] = future.result()
-
-        # Replay per-extra outputs and issues in input order for stable reports.
-        for extra in extras_to_check:
-            conflicts_count, issues, captured_output = extra_results[extra]
-            total_conflicts += conflicts_count
-            if captured_output:
-                print(captured_output, end="", file=reporter.output)
-            for issue in issues:
-                reporter.add_issue(issue)
+        total_conflicts += len(conflicts)
 
     # Output results
     reporter.print_report()
