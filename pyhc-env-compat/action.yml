@@ -15,11 +15,11 @@ inputs:
   pyhc-packages-url:
     description: "URL to PyHC Environment packages.txt"
     required: false
-    default: "https://raw.githubusercontent.com/heliophysicsPy/pyhc-docker-environment/main-v2/docker/pyhc-environment/contents/packages.txt"
+    default: "https://raw.githubusercontent.com/heliophysicsPy/pyhc-docker-environment/main/docker/pyhc-environment/contents/packages.txt"
   pyhc-constraints-url:
     description: "URL to PyHC Environment constraints.txt"
     required: false
-    default: "https://raw.githubusercontent.com/heliophysicsPy/pyhc-docker-environment/main-v2/docker/pyhc-environment/contents/constraints.txt"
+    default: "https://raw.githubusercontent.com/heliophysicsPy/pyhc-docker-environment/main/docker/pyhc-environment/contents/constraints.txt"
   extras:
     description: "Extras selection: auto | none | comma-separated list (e.g., mth5,vires)"
     required: false

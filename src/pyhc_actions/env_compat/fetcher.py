@@ -12,19 +12,19 @@ import yaml
 # Default URL to PyHC Environment packages.txt
 PYHC_PACKAGES_URL = (
     "https://raw.githubusercontent.com/heliophysicsPy/pyhc-docker-environment/"
-    "main-v2/docker/pyhc-environment/contents/packages.txt"
+    "main/docker/pyhc-environment/contents/packages.txt"
 )
 
 # Default URL to PyHC Environment constraints.txt
 PYHC_CONSTRAINTS_URL = (
     "https://raw.githubusercontent.com/heliophysicsPy/pyhc-docker-environment/"
-    "main-v2/docker/pyhc-environment/contents/constraints.txt"
+    "main/docker/pyhc-environment/contents/constraints.txt"
 )
 
 # Default URL to PyHC Environment environment.yml (conda environment file)
 PYHC_ENVIRONMENT_YML_URL = (
     "https://raw.githubusercontent.com/heliophysicsPy/pyhc-docker-environment/"
-    "main-v2/docker/pyhc-environment/contents/environment.yml"
+    "main/docker/pyhc-environment/contents/environment.yml"
 )
 
 
