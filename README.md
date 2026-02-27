@@ -130,7 +130,47 @@ Summary: 1 error(s), 0 warning(s)
 Status: FAILED
 ```
 
-## Local Usage
+## Using the Actions
+
+### Example Workflow
+
+To use the actions, you can copy the YAML below and paste it into `.github/workflows/pyhc-actions.yml`.
+**Tip:** You may want to limit push/PR triggers to packaging file changes by adding a `paths:` filter (e.g. `pyproject.toml`, `setup.py`, and the workflow file itself).
+
+```yaml
+name: PyHC Actions
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run quarterly: Jan 1, Apr 1, Jul 1, Oct 1 at 3pm UTC (8am MST)
+    - cron: 0 15 1 1,4,7,10 *
+  workflow_dispatch:
+
+jobs:
+  phep3-compliance:
+    name: PHEP 3 Compliance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check PHEP 3 Compliance
+        uses: heliophysicsPy/pyhc-actions/phep3-compliance@v1
+
+  pyhc-env-compat:
+    name: PyHC Environment Compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check PyHC Environment Compatibility
+        uses: heliophysicsPy/pyhc-actions/pyhc-env-compat@v1
+```
+
+### Local Usage
 
 You can also run the checks locally:
 
