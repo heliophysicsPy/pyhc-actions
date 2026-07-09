@@ -972,6 +972,76 @@ error: No solution found:
         result = _is_unpublished_package_error(stderr, "mypackage")
         assert result is False
 
+    def test_extract_package_registry_not_found_error(self):
+        """Test extracting package names from uv registry-not-found errors."""
+        from pyhc_actions.env_compat.uv_resolver import _extract_missing_registry_package
+
+        stderr = """
+× No solution found when resolving dependencies:
+╰─▶ Because astrometry-azel was not found in the package registry and you
+    require astrometry-azel==1.3.0, we can conclude that your requirements
+    are unsatisfiable.
+"""
+        result = _extract_missing_registry_package(stderr)
+        assert result == "astrometry-azel"
+
+    def test_registry_not_found_matches_unpublished_package(self):
+        """Test that uv registry-not-found errors match the package under test."""
+        from pyhc_actions.env_compat.uv_resolver import _is_unpublished_package_error
+
+        stderr = """
+× No solution found when resolving dependencies:
+╰─▶ Because my-package was not found in the package registry and you
+    require my-package, we can conclude that your requirements are unsatisfiable.
+"""
+        assert _is_unpublished_package_error(stderr, "my-package") is True
+        assert _is_unpublished_package_error(stderr, "other-package") is False
+
+    def test_pyhc_environment_missing_package_error_message(self, tmp_path, monkeypatch):
+        """Missing PyHC Environment packages should not be blamed on the user package."""
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            """
+[project]
+name = "hapiclient"
+"""
+        )
+
+        class DummyResult:
+            returncode = 1
+            stdout = ""
+            stderr = """
+× No solution found when resolving dependencies:
+╰─▶ Because astrometry-azel was not found in the package registry and you
+    require astrometry-azel==1.3.0, we can conclude that your requirements
+    are unsatisfiable.
+"""
+
+        monkeypatch.setattr("pyhc_actions.env_compat.uv_resolver.find_uv", lambda: "/usr/bin/uv")
+        monkeypatch.setattr("pyhc_actions.env_compat.uv_resolver.subprocess.run", lambda *a, **k: DummyResult())
+
+        reporter = Reporter(title="Test", output=StringIO(), github_actions=False)
+        ok, conflicts = check_compatibility(
+            pyproject_path=pyproject,
+            pyhc_packages=["astrometry-azel==1.3.0", "numpy>=2"],
+            pyhc_constraints=[],
+            pyhc_python="3.12.0",
+            reporter=reporter,
+        )
+
+        assert ok is False
+        assert len(conflicts) == 1
+        assert conflicts[0].package == "astrometry-azel"
+        assert conflicts[0].your_requirement == "(not involved)"
+        assert conflicts[0].pyhc_requirement == "astrometry-azel==1.3.0"
+        assert len(reporter.errors) == 1
+        assert (
+            reporter.errors[0].message
+            == "PyHC Environment package unavailable from package registry"
+        )
+        assert "not evidence that your package depends on that package" in reporter.errors[0].details
+        assert "astrometry-azel==1.3.0" in reporter.errors[0].details
+
 
 class TestParseResolvedVersions:
     """Tests for parsing resolved package versions from uv output."""

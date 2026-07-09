@@ -65,6 +65,22 @@ def _extract_canonical_name_from_spec(spec: str) -> str | None:
         return canonicalize_name(base) if base else None
 
 
+def _find_requirement_for_package(
+    package_name: str | None,
+    requirements: list[str],
+) -> str | None:
+    """Find the requirement entry for a package in a requirement list."""
+    package_name_canonical = _canonicalize_package_name(package_name)
+    if not package_name_canonical:
+        return None
+
+    for requirement in requirements:
+        if _extract_canonical_name_from_spec(requirement) == package_name_canonical:
+            return requirement
+
+    return None
+
+
 def _python_version_for_uv(pyhc_python: str | None) -> str | None:
     """Convert Python version to uv-compatible major.minor form."""
     if not pyhc_python:
@@ -345,6 +361,7 @@ def check_compatibility(
     package_name_canonical = _canonicalize_package_name(package_name)
 
     temp_constraints: str | None = None
+    pyhc_requirements_for_resolution: list[str] = []
 
     # Create temporary package list file combining both
     with tempfile.NamedTemporaryFile(
@@ -363,6 +380,7 @@ def check_compatibility(
             ):
                 continue
 
+            pyhc_requirements_for_resolution.append(req)
             f.write(f"{req}\n")
 
         # Add the package being checked (use -e for local editable install)
@@ -454,6 +472,38 @@ def check_compatibility(
             package_name = pyproject_data.get("project", {}).get("name")
         except Exception:
             package_name = None
+
+        missing_package = _extract_missing_registry_package(result.stderr)
+        missing_pyhc_requirement = _find_requirement_for_package(
+            missing_package, pyhc_requirements_for_resolution
+        )
+        if missing_package and missing_pyhc_requirement:
+            _report_error(
+                package=missing_package,
+                message="PyHC Environment package unavailable from package registry",
+                details=(
+                    "The compatibility check could not finish because the PyHC "
+                    f"Environment currently requires `{missing_pyhc_requirement}`, "
+                    "but uv could not find that package in the configured package "
+                    "registry.\n"
+                    "This is a problem with the PyHC Environment baseline, not "
+                    "evidence that your package depends on that package.\n\n"
+                    "uv reported:\n"
+                    f"{_extract_error_summary(result.stderr)}"
+                ),
+                suggestion=(
+                    "Ask PyHC Environment maintainers to remove, constrain, or "
+                    f"restore `{missing_package}`"
+                ),
+            )
+            return False, [
+                Conflict(
+                    package=missing_package,
+                    your_requirement="(not involved)",
+                    pyhc_requirement=missing_pyhc_requirement,
+                    reason="PyHC Environment package unavailable from package registry",
+                )
+            ]
 
         if _is_unpublished_package_error(result.stderr, package_name):
             _report_error(
@@ -863,6 +913,14 @@ def _is_unpublished_package_error(stderr: str, package_name: str | None = None) 
     ]
 
     stderr_lower = stderr.lower()
+    missing_package = _extract_missing_registry_package(stderr)
+    if missing_package:
+        if package_name:
+            return (
+                _canonicalize_package_name(missing_package)
+                == _canonicalize_package_name(package_name)
+            )
+        return True
 
     # Check if any indicator matches
     for indicator in indicators:
@@ -876,6 +934,22 @@ def _is_unpublished_package_error(stderr: str, package_name: str | None = None) 
                 return True
 
     return False
+
+
+def _extract_missing_registry_package(stderr: str) -> str | None:
+    """Extract the package name when uv reports a package is missing from a registry."""
+    patterns = [
+        r"Because\s+([A-Za-z0-9_.-]+)\s+was\s+not\s+found\s+in\s+the\s+package\s+registry",
+        r"Because\s+there\s+is\s+no\s+version\s+of\s+([A-Za-z0-9_.-]+)(?:\s|[<>=!~]|,)",
+        r"Could\s+not\s+find\s+a\s+version\s+that\s+satisfies\s+the\s+requirement\s+([A-Za-z0-9_.-]+)",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, stderr, re.IGNORECASE)
+        if match:
+            return match.group(1)
+
+    return None
 
 
 def _extract_error_summary(stderr: str) -> str:
