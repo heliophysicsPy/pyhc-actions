@@ -236,21 +236,23 @@ When releasing a new version:
 
 ```bash
 # Create and push the specific version tag
-git tag v1.0.1
-git push origin v1.0.1
-
-# Update the major version tag to point to the new release
-git tag -f v1 v1.0.1
-git push -f origin v1
-
-# Create the GitHub release
-gh release create v1.0.1 --title "v1.0.1" --notes "Release notes here"
+git tag v1.1.2
+git push origin v1.1.2
 ```
+
+The Release workflow validates the version tag, runs the test suite, refreshes
+the bundled `schedule.json`, creates the GitHub release, and moves the matching
+major version tag (for example, `v1`) to the new release.
+
+GitHub [generates the change list](https://docs.github.com/en/repositories/releasing-projects-on-github/automatically-generated-release-notes)
+from merged pull request titles, contributors, and the comparison with the
+previous immutable release tag. The workflow prepends the action usage
+instructions to that generated list; it does not require an AI service.
 
 ### Why Both Tags?
 
 - Users reference `@v1` in their workflows to automatically get the latest v1.x.x updates
-- The floating `v1` tag must be manually updated after each release
+- The Release workflow automatically updates the floating `v1` tag
 - Specific version tags (`v1.0.0`) remain immutable for reproducibility
 
 ## Schedule Updates

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from pyhc_actions.common.reporter import Reporter
 from pyhc_actions.env_compat.uv_resolver import (
+    ConflictOrigin,
     check_compatibility,
     find_uv,
     discover_optional_extras,
@@ -182,20 +183,25 @@ Examples:
     )
     total_conflicts += len(conflicts)
     overall_compatible = overall_compatible and is_compatible
+    baseline_unavailable = any(
+        getattr(conflict, "origin", None) == ConflictOrigin.PYHC_ENVIRONMENT
+        for conflict in conflicts
+    )
 
     # Run per-extra checks
-    for extra in extras_to_check:
-        is_compatible, conflicts = check_compatibility(
-            pyproject_path=project_path,
-            pyhc_packages=pyhc_packages,
-            pyhc_constraints=pyhc_constraints,
-            pyhc_python=pyhc_python,
-            extra=extra,
-            context=extra,
-            report_as_warning=True,
-            reporter=reporter,
-        )
-        total_conflicts += len(conflicts)
+    if not baseline_unavailable:
+        for extra in extras_to_check:
+            is_compatible, conflicts = check_compatibility(
+                pyproject_path=project_path,
+                pyhc_packages=pyhc_packages,
+                pyhc_constraints=pyhc_constraints,
+                pyhc_python=pyhc_python,
+                extra=extra,
+                context=extra,
+                report_as_warning=True,
+                reporter=reporter,
+            )
+            total_conflicts += len(conflicts)
 
     # Output results
     reporter.print_report()
