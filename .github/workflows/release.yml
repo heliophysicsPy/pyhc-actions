@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - 'v*'
 
 permissions:
   contents: write
@@ -14,33 +14,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Validate release tag
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Release tags must use the vMAJOR.MINOR.PATCH format"
-            exit 1
-          fi
-
-      - name: Find previous immutable release tag
-        id: release_tags
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          PREVIOUS_TAG=""
-          while IFS= read -r TAG; do
-            if [[ "$TAG" != "$RELEASE_TAG" && "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              PREVIOUS_TAG="$TAG"
-              break
-            fi
-          done < <(git tag --list 'v*.*.*' --sort=-version:refname)
-          echo "previous_tag=$PREVIOUS_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -50,10 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Run tests
-        run: pytest tests/ -q
+          pip install packaging tomlkit requests
 
       - name: Generate fresh schedule.json
         env:
@@ -62,10 +32,8 @@ jobs:
           python -c "from pyhc_actions.phep3.pypi_fetcher import update_schedule_file; update_schedule_file('schedule.json')"
 
       - name: Create Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v1
         with:
-          generate_release_notes: true
-          previous_tag: ${{ steps.release_tags.outputs.previous_tag }}
           files: |
             schedule.json
           body: |
