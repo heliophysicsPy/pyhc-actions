@@ -235,14 +235,19 @@ This repository follows the standard GitHub Actions versioning pattern with majo
 When releasing a new version:
 
 ```bash
-# Create and push the specific version tag
+# Create and push the immutable version tag
 git tag v1.1.2
 git push origin v1.1.2
 ```
 
 The Release workflow validates the version tag, runs the test suite, refreshes
-the bundled `schedule.json`, creates the GitHub release, and moves the matching
-major version tag (for example, `v1`) to the new release.
+the bundled `schedule.json`, and creates the GitHub release. After that workflow
+completes successfully, update the floating major version tag manually:
+
+```bash
+git tag --force v1 v1.1.2
+git push --force origin v1
+```
 
 GitHub [generates the change list](https://docs.github.com/en/repositories/releasing-projects-on-github/automatically-generated-release-notes)
 from merged pull request titles, contributors, and the comparison with the
@@ -252,7 +257,7 @@ instructions to that generated list; it does not require an AI service.
 ### Why Both Tags?
 
 - Users reference `@v1` in their workflows to automatically get the latest v1.x.x updates
-- The Release workflow automatically updates the floating `v1` tag
+- Maintainers manually update the floating `v1` tag after each successful release
 - Specific version tags (`v1.0.0`) remain immutable for reproducibility
 
 ## Schedule Updates

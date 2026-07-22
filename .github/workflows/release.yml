@@ -85,12 +85,3 @@ jobs:
 
             ### Included Files
             - `schedule.json` - Current release schedule for Python and core Scientific Python packages
-
-      - name: Update floating major version tag
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          MAJOR_TAG="${RELEASE_TAG%%.*}"
-          git tag --force "$MAJOR_TAG" "$GITHUB_SHA"
-          git push --force origin "refs/tags/$MAJOR_TAG"
