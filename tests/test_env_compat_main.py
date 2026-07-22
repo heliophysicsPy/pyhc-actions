@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from pyhc_actions.env_compat import main as env_main
+from pyhc_actions.env_compat.uv_resolver import Conflict, ConflictOrigin
 
 
 def _write_min_pyproject(path: Path) -> None:
@@ -61,6 +62,38 @@ def test_main_extras_none(monkeypatch, tmp_path):
     exit_code = env_main.main([str(pyproject), "--extras", "none"])
 
     assert exit_code == 0
+    assert calls == [None]
+
+
+def test_main_skips_extras_when_pyhc_baseline_is_unavailable(monkeypatch, tmp_path):
+    pyproject = tmp_path / "pyproject.toml"
+    _write_min_pyproject(pyproject)
+
+    calls: list[str | None] = []
+
+    def fake_check_compatibility(*, extra=None, **_kwargs):
+        calls.append(extra)
+        return False, [
+            Conflict(
+                package="vanished-child",
+                your_requirement="(not involved)",
+                pyhc_requirement="PyHC Environment baseline",
+                reason="PyHC Environment baseline could not be resolved",
+                origin=ConflictOrigin.PYHC_ENVIRONMENT,
+            )
+        ]
+
+    monkeypatch.setattr(env_main, "check_compatibility", fake_check_compatibility)
+    monkeypatch.setattr(env_main, "discover_optional_extras", lambda _p: ["foo", "bar"])
+    monkeypatch.setattr(env_main, "load_pyhc_packages", lambda _p: [])
+    monkeypatch.setattr(env_main, "load_pyhc_constraints", lambda _p: [])
+    monkeypatch.setattr(env_main, "get_pyhc_python_version", lambda: "3.12.0")
+    monkeypatch.setattr(env_main.Reporter, "print_report", lambda _self: None)
+    monkeypatch.setattr(env_main.Reporter, "write_github_summary", lambda _self: None)
+
+    exit_code = env_main.main([str(pyproject), "--extras", "auto"])
+
+    assert exit_code == 1
     assert calls == [None]
 
 

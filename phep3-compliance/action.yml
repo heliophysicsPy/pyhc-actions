@@ -88,10 +88,11 @@ runs:
 
     - name: Install uv
       if: ${{ inputs.use-uv-fallback == 'true' }}
-      shell: bash
-      run: |
-        curl -LsSf https://astral.sh/uv/install.sh | sh
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
+      uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      with:
+        # Keep in sync with pyhc-env-compat/action.yml and the integration test.
+        version: "0.11.28"
+        enable-cache: true
 
     - name: Install dependencies
       shell: bash

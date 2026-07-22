@@ -40,6 +40,8 @@ jobs:
 
   integration-test:
     runs-on: ubuntu-latest
+    env:
+      INTEGRATION_FIXTURES: tests/fixtures/integration
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -50,9 +52,11 @@ jobs:
           python-version: '3.12'
 
       - name: Install uv
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          # Keep in sync with both composite actions.
+          version: "0.11.28"
+          enable-cache: true
 
       - name: Install dependencies
         run: |
@@ -61,35 +65,44 @@ jobs:
 
       - name: Test PHEP 3 checker CLI
         run: |
-          # Generate schedule first
           phep3-check --generate-schedule --schedule-output test-schedule.json
+          phep3-check \
+            --schedule test-schedule.json \
+            "$INTEGRATION_FIXTURES/pyproject.toml"
 
-          # Create a test pyproject.toml
-          cat > test-pyproject.toml << 'EOF'
-          [project]
-          name = "test-package"
-          version = "1.0.0"
-          requires-python = ">=3.11"
-          dependencies = [
-              "numpy>=1.26",
-          ]
-          EOF
+      - name: Test PHEP 3 uv metadata fallback
+        uses: ./phep3-compliance
+        with:
+          schedule-path: test-schedule.json
+          project-file: ${{ github.workspace }}/tests/fixtures/integration/legacy-package
 
-          # Run check (should pass)
-          phep3-check --schedule test-schedule.json test-pyproject.toml || true
-
-      - name: Test PyHC env compat checker CLI
+      - name: Test successful PyHC env compatibility check
         run: |
-          # Create a simple test pyproject.toml
-          cat > test-pyproject.toml << 'EOF'
-          [project]
-          name = "test-package"
-          version = "1.0.0"
-          requires-python = ">=3.11"
-          dependencies = [
-              "numpy>=1.26",
-          ]
-          EOF
+          pyhc-env-compat-check \
+            --packages "$INTEGRATION_FIXTURES/empty-packages.txt" \
+            --constraints "$INTEGRATION_FIXTURES/constraints.txt" \
+            --extras none \
+            "$INTEGRATION_FIXTURES/pyproject.toml"
 
-          # Run check (may fail if conflicts, but should not crash)
-          pyhc-env-compat-check test-pyproject.toml || true
+      - name: Test missing PyHC baseline package attribution
+        run: |
+          if pyhc-env-compat-check \
+            --packages "$INTEGRATION_FIXTURES/missing-baseline-packages.txt" \
+            --constraints "$INTEGRATION_FIXTURES/constraints.txt" \
+            --extras none \
+            "$INTEGRATION_FIXTURES/pyproject.toml" \
+            > missing-baseline-output.txt 2>&1; then
+            echo "Expected the missing baseline check to fail"
+            exit 1
+          fi
+
+          grep -F "PyHC Environment baseline package unavailable from package registry" missing-baseline-output.txt
+          grep -F "Your package's compatibility could not be evaluated" missing-baseline-output.txt
+          grep -F "your package is not implicated" missing-baseline-output.txt
+          grep -F "Contact PyHC Environment maintainers" missing-baseline-output.txt
+
+          if grep -Fq "Your requirement:" missing-baseline-output.txt; then
+            echo "The baseline failure was incorrectly attributed to the downstream package"
+            cat missing-baseline-output.txt
+            exit 1
+          fi

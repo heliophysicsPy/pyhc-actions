@@ -8,6 +8,7 @@ from pyhc_actions.env_compat.uv_resolver import (
     parse_uv_error,
     find_uv,
     Conflict,
+    ConflictOrigin,
     _is_python_version_error,
     _extract_conflict_from_error,
     _extract_error_summary,
@@ -1017,10 +1018,18 @@ name = "hapiclient"
     are unsatisfiable.
 """
 
-        monkeypatch.setattr("pyhc_actions.env_compat.uv_resolver.find_uv", lambda: "/usr/bin/uv")
-        monkeypatch.setattr("pyhc_actions.env_compat.uv_resolver.subprocess.run", lambda *a, **k: DummyResult())
+        results = iter([DummyResult(), DummyResult()])
 
-        reporter = Reporter(title="Test", output=StringIO(), github_actions=False)
+        monkeypatch.setattr(
+            "pyhc_actions.env_compat.uv_resolver.find_uv", lambda: "/usr/bin/uv"
+        )
+        monkeypatch.setattr(
+            "pyhc_actions.env_compat.uv_resolver.subprocess.run",
+            lambda *a, **k: next(results),
+        )
+
+        output = StringIO()
+        reporter = Reporter(title="Test", output=output, github_actions=False)
         ok, conflicts = check_compatibility(
             pyproject_path=pyproject,
             pyhc_packages=["astrometry-azel==1.3.0", "numpy>=2"],
@@ -1034,13 +1043,176 @@ name = "hapiclient"
         assert conflicts[0].package == "astrometry-azel"
         assert conflicts[0].your_requirement == "(not involved)"
         assert conflicts[0].pyhc_requirement == "astrometry-azel==1.3.0"
+        assert conflicts[0].origin == ConflictOrigin.PYHC_ENVIRONMENT
         assert len(reporter.errors) == 1
         assert (
             reporter.errors[0].message
-            == "PyHC Environment package unavailable from package registry"
+            == "PyHC Environment baseline package unavailable from package registry"
         )
-        assert "not evidence that your package depends on that package" in reporter.errors[0].details
+        assert "compatibility could not be evaluated" in reporter.errors[0].details
+        assert "not implicated" in reporter.errors[0].details
         assert "astrometry-azel==1.3.0" in reporter.errors[0].details
+        assert reporter.errors[0].suggestion == (
+            "Contact PyHC Environment maintainers to remove, constrain, or restore "
+            "`astrometry-azel`"
+        )
+
+        reporter.print_report()
+        assert output.getvalue() == (
+            "Test\n"
+            "====\n"
+            "\n"
+            "ERRORS:\n"
+            "[ERROR] PyHC Environment baseline package unavailable from package registry\n"
+            "        The compatibility check is inconclusive because the PyHC Environment baseline could not be resolved on its own.\n"
+            "        The baseline requires `astrometry-azel==1.3.0`, but uv could not find `astrometry-azel` in the configured package registry.\n"
+            "        Your package's compatibility could not be evaluated, and your package is not implicated in this failure.\n"
+            "        Suggested: Contact PyHC Environment maintainers to remove, constrain, or restore `astrometry-azel`\n"
+            "\n"
+            "Summary: 1 error(s), 0 warning(s)\n"
+            "Status: FAILED\n"
+        )
+
+    def test_transitive_pyhc_missing_package_is_attributed_to_baseline(
+        self, tmp_path, monkeypatch
+    ):
+        """Transitive registry removals should not be attributed to the user package."""
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text('[project]\nname = "hapiclient"\n')
+
+        class DummyResult:
+            returncode = 1
+            stdout = ""
+            stderr = """
+× No solution found when resolving dependencies:
+╰─▶ Because environment-parent==1.0 depends on vanished-child>=2 and vanished-child was not found in the package registry, we can conclude that environment-parent==1.0 cannot be used.
+And because you require environment-parent==1.0, we can conclude that your requirements are unsatisfiable.
+"""
+
+        results = iter([DummyResult(), DummyResult()])
+        monkeypatch.setattr(
+            "pyhc_actions.env_compat.uv_resolver.find_uv", lambda: "/usr/bin/uv"
+        )
+        monkeypatch.setattr(
+            "pyhc_actions.env_compat.uv_resolver.subprocess.run",
+            lambda *a, **k: next(results),
+        )
+
+        reporter = Reporter(title="Test", output=StringIO(), github_actions=False)
+        ok, conflicts = check_compatibility(
+            pyproject_path=pyproject,
+            pyhc_packages=["environment-parent==1.0"],
+            pyhc_constraints=[],
+            pyhc_python="3.12.0",
+            reporter=reporter,
+        )
+
+        assert ok is False
+        assert conflicts == [
+            Conflict(
+                package="vanished-child",
+                your_requirement="(not involved)",
+                pyhc_requirement="PyHC Environment baseline (transitive dependency)",
+                reason=(
+                    "PyHC Environment baseline package unavailable from package "
+                    "registry"
+                ),
+                origin=ConflictOrigin.PYHC_ENVIRONMENT,
+            )
+        ]
+        assert "not implicated" in reporter.errors[0].details
+        assert "Your requirement:" not in reporter.errors[0].details
+        assert reporter.errors[0].suggestion.startswith(
+            "Contact PyHC Environment maintainers"
+        )
+
+    def test_generic_pyhc_baseline_failure_is_inconclusive(
+        self, tmp_path, monkeypatch
+    ):
+        """Any independently broken baseline should be reported without user blame."""
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text('[project]\nname = "hapiclient"\n')
+
+        class DummyResult:
+            returncode = 1
+            stdout = ""
+            stderr = """
+× No solution found when resolving dependencies:
+╰─▶ Because environment-a==1 depends on numpy<2 and environment-b==1 depends on numpy>=2, we can conclude that the baseline is unsatisfiable.
+"""
+
+        results = iter([DummyResult(), DummyResult()])
+        monkeypatch.setattr(
+            "pyhc_actions.env_compat.uv_resolver.find_uv", lambda: "/usr/bin/uv"
+        )
+        monkeypatch.setattr(
+            "pyhc_actions.env_compat.uv_resolver.subprocess.run",
+            lambda *a, **k: next(results),
+        )
+
+        reporter = Reporter(title="Test", output=StringIO(), github_actions=False)
+        ok, conflicts = check_compatibility(
+            pyproject_path=pyproject,
+            pyhc_packages=["environment-a==1", "environment-b==1"],
+            pyhc_constraints=[],
+            pyhc_python="3.12.0",
+            reporter=reporter,
+        )
+
+        assert ok is False
+        assert conflicts[0].origin == ConflictOrigin.PYHC_ENVIRONMENT
+        assert conflicts[0].package == "pyhc-environment"
+        assert reporter.errors[0].message == (
+            "PyHC Environment baseline could not be resolved"
+        )
+        assert "baseline-only resolver diagnostic" in reporter.errors[0].details
+        assert "not implicated" in reporter.errors[0].details
+
+    def test_missing_user_dependency_is_not_attributed_to_pyhc(
+        self, tmp_path, monkeypatch
+    ):
+        """A missing dependency introduced by the user package should remain user-owned."""
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text('[project]\nname = "hapiclient"\n')
+
+        class CombinedFailure:
+            returncode = 1
+            stdout = ""
+            stderr = """
+× No solution found when resolving dependencies:
+╰─▶ Because vanished-child was not found in the package registry and your package requires vanished-child, your requirements are unsatisfiable.
+"""
+
+        class BaselineSuccess:
+            returncode = 0
+            stdout = "numpy==2.0.0\n"
+            stderr = ""
+
+        results = iter([CombinedFailure(), BaselineSuccess()])
+        monkeypatch.setattr(
+            "pyhc_actions.env_compat.uv_resolver.find_uv", lambda: "/usr/bin/uv"
+        )
+        monkeypatch.setattr(
+            "pyhc_actions.env_compat.uv_resolver.subprocess.run",
+            lambda *a, **k: next(results),
+        )
+
+        reporter = Reporter(title="Test", output=StringIO(), github_actions=False)
+        ok, conflicts = check_compatibility(
+            pyproject_path=pyproject,
+            pyhc_packages=["numpy>=2"],
+            pyhc_constraints=[],
+            pyhc_python="3.12.0",
+            reporter=reporter,
+        )
+
+        assert ok is False
+        assert conflicts[0].origin == ConflictOrigin.PACKAGE
+        assert conflicts[0].package == "vanished-child"
+        assert reporter.errors[0].message == (
+            "Package dependency unavailable from package registry"
+        )
+        assert "baseline resolves on its own" in reporter.errors[0].details
 
 
 class TestParseResolvedVersions:

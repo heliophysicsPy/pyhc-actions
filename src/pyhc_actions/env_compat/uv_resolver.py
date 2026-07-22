@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 
 from packaging.requirements import InvalidRequirement, Requirement
@@ -133,6 +134,13 @@ def parse_resolved_versions(uv_output: str) -> dict[str, str]:
     return resolved
 
 
+class ConflictOrigin(str, Enum):
+    """Identifies which side of the compatibility check introduced a failure."""
+
+    PACKAGE = "package"
+    PYHC_ENVIRONMENT = "pyhc-environment"
+
+
 @dataclass
 class Conflict:
     """Represents a dependency conflict."""
@@ -141,6 +149,7 @@ class Conflict:
     your_requirement: str
     pyhc_requirement: str
     reason: str
+    origin: ConflictOrigin = ConflictOrigin.PACKAGE
 
 
 def check_python_compatibility(
@@ -215,6 +224,30 @@ def find_uv() -> str | None:
             return str(candidate)
 
     return None
+
+
+def _run_uv_compile(
+    uv_path: str,
+    requirements_file: str,
+    constraints_file: str | None,
+    pyhc_python: str | None,
+    cwd: Path,
+) -> subprocess.CompletedProcess[str]:
+    """Run uv against one requirements input with the checker configuration."""
+    command = [uv_path, "pip", "compile", "--no-config"]
+    uv_python_version = _python_version_for_uv(pyhc_python)
+    if uv_python_version:
+        command.extend(["--python-version", uv_python_version])
+    command.append(requirements_file)
+    if constraints_file:
+        command.extend(["-c", constraints_file])
+
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+    )
 
 
 def check_compatibility(
@@ -361,6 +394,7 @@ def check_compatibility(
     package_name_canonical = _canonicalize_package_name(package_name)
 
     temp_constraints: str | None = None
+    temp_baseline_packages: str | None = None
     pyhc_requirements_for_resolution: list[str] = []
 
     # Create temporary package list file combining both
@@ -398,28 +432,17 @@ def check_compatibility(
             temp_constraints = f.name
 
     try:
-        # Run uv pip compile to check if resolution is possible.
-        command = [
-            uv_path,
-            "pip",
-            "compile",
-            "--no-config",
-        ]
-        uv_python_version = _python_version_for_uv(pyhc_python)
-        if uv_python_version:
-            command.extend(["--python-version", uv_python_version])
-        command.append(temp_packages)
-        if temp_constraints:
-            command.extend(["-c", temp_constraints])
-
         # We used to force UV_NO_CACHE=1 here for fully cold resolves, but removed that
         # override to improve env-compat performance across repeated extras checks.
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            # Handle both directory paths (setup.py) and file paths (pyproject.toml)
-            cwd=pyproject_path if pyproject_path.is_dir() else pyproject_path.parent,
+        resolution_cwd = (
+            pyproject_path if pyproject_path.is_dir() else pyproject_path.parent
+        )
+        result = _run_uv_compile(
+            uv_path=uv_path,
+            requirements_file=temp_packages,
+            constraints_file=temp_constraints,
+            pyhc_python=pyhc_python,
+            cwd=resolution_cwd,
         )
 
         if result.returncode == 0:
@@ -441,7 +464,7 @@ def check_compatibility(
 
             return True, []
 
-        # Check if error is platform-specific (not a real conflict)
+        # Preserve non-conflict handling before running the baseline diagnosis.
         if _is_platform_specific_error(result.stderr):
             reporter.add_warning(
                 package="platform",
@@ -450,9 +473,8 @@ def check_compatibility(
                 "This check may fail locally on macOS/Windows but will pass on GitHub Actions.",
                 context=context,
             )
-            return True, []  # Not a real conflict
+            return True, []
 
-        # Check if error is due to Python version mismatch
         is_python_error, required_version = _is_python_version_error(result.stderr)
         if is_python_error:
             reporter.add_warning(
@@ -463,7 +485,97 @@ def check_compatibility(
                 "Run with a compatible Python version to verify package compatibility.",
                 context=context,
             )
-            return True, []  # Not a package conflict
+            return True, []
+
+        # A combined failure does not establish which side caused it. Resolve the
+        # PyHC baseline alone before attributing the failure to the package under test.
+        if pyhc_requirements_for_resolution:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", delete=False
+            ) as f:
+                for requirement in pyhc_requirements_for_resolution:
+                    f.write(f"{requirement}\n")
+                temp_baseline_packages = f.name
+
+            baseline_result = _run_uv_compile(
+                uv_path=uv_path,
+                requirements_file=temp_baseline_packages,
+                constraints_file=temp_constraints,
+                pyhc_python=pyhc_python,
+                cwd=resolution_cwd,
+            )
+            if baseline_result.returncode != 0:
+                missing_package = _extract_missing_registry_package(
+                    baseline_result.stderr
+                )
+                missing_requirement = _find_requirement_for_package(
+                    missing_package, pyhc_requirements_for_resolution
+                )
+
+                if missing_package:
+                    if missing_requirement:
+                        failure_description = (
+                            f"The baseline requires `{missing_requirement}`, but uv "
+                            f"could not find `{missing_package}` in the configured "
+                            "package registry."
+                        )
+                        pyhc_requirement = missing_requirement
+                    else:
+                        failure_description = (
+                            "While resolving the baseline, uv could not find its "
+                            f"dependency `{missing_package}` in the configured package "
+                            "registry."
+                        )
+                        pyhc_requirement = (
+                            "PyHC Environment baseline (transitive dependency)"
+                        )
+
+                    message = (
+                        "PyHC Environment baseline package unavailable from package "
+                        "registry"
+                    )
+                    suggestion = (
+                        "Contact PyHC Environment maintainers to remove, constrain, "
+                        f"or restore `{missing_package}`"
+                    )
+                    conflict_package = missing_package
+                else:
+                    failure_description = (
+                        "The baseline-only resolver diagnostic follows. Because this "
+                        "run did not include your package, uv's references to 'you' or "
+                        "'your requirements' refer only to the PyHC Environment input."
+                        "\n\n"
+                        f"{_extract_error_summary(baseline_result.stderr)}"
+                    )
+                    pyhc_requirement = "PyHC Environment baseline"
+                    message = "PyHC Environment baseline could not be resolved"
+                    suggestion = (
+                        "Contact PyHC Environment maintainers and share this workflow "
+                        "run"
+                    )
+                    conflict_package = "pyhc-environment"
+
+                _report_error(
+                    package=conflict_package,
+                    message=message,
+                    details=(
+                        "The compatibility check is inconclusive because the PyHC "
+                        "Environment baseline could not be resolved on its own.\n"
+                        f"{failure_description}\n"
+                        "Your package's compatibility could not be evaluated, and your "
+                        "package is not implicated in this failure."
+                    ),
+                    suggestion=suggestion,
+                )
+                return False, [
+                    Conflict(
+                        package=conflict_package,
+                        your_requirement="(not involved)",
+                        pyhc_requirement=pyhc_requirement,
+                        reason=message,
+                        origin=ConflictOrigin.PYHC_ENVIRONMENT,
+                    )
+                ]
 
         # Check if error is due to package resolution issues (not on PyPI, no wheels, build issues)
         # Extract package name from pyproject.toml
@@ -472,38 +584,6 @@ def check_compatibility(
             package_name = pyproject_data.get("project", {}).get("name")
         except Exception:
             package_name = None
-
-        missing_package = _extract_missing_registry_package(result.stderr)
-        missing_pyhc_requirement = _find_requirement_for_package(
-            missing_package, pyhc_requirements_for_resolution
-        )
-        if missing_package and missing_pyhc_requirement:
-            _report_error(
-                package=missing_package,
-                message="PyHC Environment package unavailable from package registry",
-                details=(
-                    "The compatibility check could not finish because the PyHC "
-                    f"Environment currently requires `{missing_pyhc_requirement}`, "
-                    "but uv could not find that package in the configured package "
-                    "registry.\n"
-                    "This is a problem with the PyHC Environment baseline, not "
-                    "evidence that your package depends on that package.\n\n"
-                    "uv reported:\n"
-                    f"{_extract_error_summary(result.stderr)}"
-                ),
-                suggestion=(
-                    "Ask PyHC Environment maintainers to remove, constrain, or "
-                    f"restore `{missing_package}`"
-                ),
-            )
-            return False, [
-                Conflict(
-                    package=missing_package,
-                    your_requirement="(not involved)",
-                    pyhc_requirement=missing_pyhc_requirement,
-                    reason="PyHC Environment package unavailable from package registry",
-                )
-            ]
 
         if _is_unpublished_package_error(result.stderr, package_name):
             _report_error(
@@ -523,6 +603,33 @@ def check_compatibility(
                     your_requirement="(unable to resolve)",
                     pyhc_requirement="PyHC Environment",
                     reason="Package resolution failed - see details above",
+                )
+            ]
+
+        missing_package = _extract_missing_registry_package(result.stderr)
+        if missing_package:
+            _report_error(
+                package=missing_package,
+                message="Package dependency unavailable from package registry",
+                details=(
+                    "The PyHC Environment baseline resolves on its own, but the "
+                    "compatibility check could not finish after adding your package.\n"
+                    f"Your package's dependency graph requires `{missing_package}`, "
+                    "which uv could not find in the configured package registry.\n\n"
+                    "uv reported:\n"
+                    f"{_extract_error_summary(result.stderr)}"
+                ),
+                suggestion=(
+                    f"Restore, replace, or remove `{missing_package}` in your package's "
+                    "dependency graph"
+                ),
+            )
+            return False, [
+                Conflict(
+                    package=missing_package,
+                    your_requirement=f"dependency graph requires {missing_package}",
+                    pyhc_requirement="PyHC Environment baseline resolves",
+                    reason="Package dependency unavailable from package registry",
                 )
             ]
 
@@ -568,6 +675,8 @@ def check_compatibility(
     finally:
         # Clean up temp files
         Path(temp_packages).unlink(missing_ok=True)
+        if temp_baseline_packages:
+            Path(temp_baseline_packages).unlink(missing_ok=True)
         if temp_constraints:
             Path(temp_constraints).unlink(missing_ok=True)
 
@@ -939,7 +1048,7 @@ def _is_unpublished_package_error(stderr: str, package_name: str | None = None) 
 def _extract_missing_registry_package(stderr: str) -> str | None:
     """Extract the package name when uv reports a package is missing from a registry."""
     patterns = [
-        r"Because\s+([A-Za-z0-9_.-]+)\s+was\s+not\s+found\s+in\s+the\s+package\s+registry",
+        r"\b([A-Za-z0-9_.-]+)\s+was\s+not\s+found\s+in\s+the\s+package\s+registry",
         r"Because\s+there\s+is\s+no\s+version\s+of\s+([A-Za-z0-9_.-]+)(?:\s|[<>=!~]|,)",
         r"Could\s+not\s+find\s+a\s+version\s+that\s+satisfies\s+the\s+requirement\s+([A-Za-z0-9_.-]+)",
     ]
