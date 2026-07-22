@@ -44,7 +44,7 @@ runs:
     - name: Install uv
       uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
       with:
-        # Keep in sync with the integration test because uv diagnostics are parsed.
+        # Keep in sync with phep3-compliance/action.yml and the integration test.
         version: "0.11.28"
         enable-cache: true
 
