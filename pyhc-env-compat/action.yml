@@ -89,8 +89,10 @@ runs:
           CHECK_ARGS+=(--extras "$EXTRAS")
         fi
 
-        python -m pyhc_actions.env_compat.main "${CHECK_ARGS[@]}" "$PROJECT_FILE"
-        EXIT_CODE=$?
+        # `shell: bash` runs with `-e`, so guard the call to keep the failure
+        # branch below reachable instead of aborting the step immediately.
+        EXIT_CODE=0
+        python -m pyhc_actions.env_compat.main "${CHECK_ARGS[@]}" "$PROJECT_FILE" || EXIT_CODE=$?
 
         if [ $EXIT_CODE -eq 0 ]; then
           echo "compatible=true" >> "$GITHUB_OUTPUT"

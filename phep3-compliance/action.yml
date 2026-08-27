@@ -139,8 +139,10 @@ runs:
         fi
 
         CHECK_ARGS+=("$PROJECT_FILE")
-        python -m pyhc_actions.phep3.main "${CHECK_ARGS[@]}"
-        EXIT_CODE=$?
+        # `shell: bash` runs with `-e`, so guard the call to keep the failure
+        # branch below reachable instead of aborting the step immediately.
+        EXIT_CODE=0
+        python -m pyhc_actions.phep3.main "${CHECK_ARGS[@]}" || EXIT_CODE=$?
 
         if [ $EXIT_CODE -eq 0 ]; then
           echo "passed=true" >> "$GITHUB_OUTPUT"
