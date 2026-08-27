@@ -37,7 +37,7 @@ runs:
   using: "composite"
   steps:
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
       with:
         python-version: "3.12"
 
@@ -64,6 +64,10 @@ runs:
       shell: bash
       env:
         PYTHONPATH: ${{ github.action_path }}/../src
+        PACKAGES_URL: ${{ inputs.pyhc-packages-url }}
+        CONSTRAINTS_URL: ${{ inputs.pyhc-constraints-url }}
+        EXTRAS: ${{ inputs.extras }}
+        PROJECT_FILE: ${{ inputs.project-file }}
       run: |
         # Ensure git history/tags are available for setuptools_scm versioning
         if [ -d .git ]; then
@@ -74,22 +78,18 @@ runs:
           fi
         fi
 
-        PACKAGES_ARG=""
-        if [ -n "${{ inputs.pyhc-packages-url }}" ]; then
-          PACKAGES_ARG="--packages ${{ inputs.pyhc-packages-url }}"
+        CHECK_ARGS=()
+        if [ -n "$PACKAGES_URL" ]; then
+          CHECK_ARGS+=(--packages "$PACKAGES_URL")
+        fi
+        if [ -n "$CONSTRAINTS_URL" ]; then
+          CHECK_ARGS+=(--constraints "$CONSTRAINTS_URL")
+        fi
+        if [ -n "$EXTRAS" ]; then
+          CHECK_ARGS+=(--extras "$EXTRAS")
         fi
 
-        CONSTRAINTS_ARG=""
-        if [ -n "${{ inputs.pyhc-constraints-url }}" ]; then
-          CONSTRAINTS_ARG="--constraints ${{ inputs.pyhc-constraints-url }}"
-        fi
-
-        EXTRAS_ARG=""
-        if [ -n "${{ inputs.extras }}" ]; then
-          EXTRAS_ARG="--extras ${{ inputs.extras }}"
-        fi
-
-        python -m pyhc_actions.env_compat.main $PACKAGES_ARG $CONSTRAINTS_ARG $EXTRAS_ARG "${{ inputs.project-file }}"
+        python -m pyhc_actions.env_compat.main "${CHECK_ARGS[@]}" "$PROJECT_FILE"
         EXIT_CODE=$?
 
         if [ $EXIT_CODE -eq 0 ]; then

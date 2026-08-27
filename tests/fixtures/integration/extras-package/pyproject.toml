@@ -1,0 +1,12 @@
+# Fixture for the extras quoting probe: the extras names are passed to the
+# composite action as a single comma-separated value that contains a space,
+# which only survives if the action quotes the input instead of word-splitting it.
+[project]
+name = "pyhc-actions-extras-integration-test"
+version = "1.0.0"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+alpha = []
+beta = []

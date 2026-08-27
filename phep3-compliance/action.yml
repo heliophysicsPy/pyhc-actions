@@ -50,10 +50,12 @@ runs:
     - name: Download schedule.json
       if: ${{ inputs.schedule-path == '' }}
       shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
       run: |
         # Try to download from PyHC releases, fall back to generating
         SCHEDULE_URL="https://github.com/heliophysicsPy/pyhc-actions/releases/latest/download/schedule.json"
-        if curl -fsSL "$SCHEDULE_URL" -o "${{ github.action_path }}/../schedule.json" 2>/dev/null; then
+        if curl -fsSL "$SCHEDULE_URL" -o "$ACTION_PATH/../schedule.json" 2>/dev/null; then
           echo "Downloaded schedule.json from releases"
         else
           echo "Could not download schedule.json, will use built-in Python schedule"
@@ -62,18 +64,21 @@ runs:
     - name: Compute minimum PHEP 3 Python version
       id: python-version
       shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        SCHEDULE_PATH: ${{ inputs.schedule-path }}
       run: |
         # Determine which schedule file to use
         SCHEDULE_FILE=""
-        if [ -n "${{ inputs.schedule-path }}" ]; then
-          SCHEDULE_FILE="${{ inputs.schedule-path }}"
-        elif [ -f "${{ github.action_path }}/../schedule.json" ]; then
-          SCHEDULE_FILE="${{ github.action_path }}/../schedule.json"
+        if [ -n "$SCHEDULE_PATH" ]; then
+          SCHEDULE_FILE="$SCHEDULE_PATH"
+        elif [ -f "$ACTION_PATH/../schedule.json" ]; then
+          SCHEDULE_FILE="$ACTION_PATH/../schedule.json"
         fi
 
         if [ -n "$SCHEDULE_FILE" ] && [ -f "$SCHEDULE_FILE" ]; then
           # Extract minimum Python version from schedule.json
-          MIN_PYTHON=$(python3 "${{ github.action_path }}/get_min_python.py" "$SCHEDULE_FILE" 2>/dev/null || echo "3.12")
+          MIN_PYTHON=$(python3 "$ACTION_PATH/get_min_python.py" "$SCHEDULE_FILE" 2>/dev/null || echo "3.12")
         else
           MIN_PYTHON="3.12"
         fi
@@ -82,7 +87,7 @@ runs:
         echo "version=$MIN_PYTHON" >> "$GITHUB_OUTPUT"
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
       with:
         python-version: ${{ steps.python-version.outputs.version }}
 
@@ -105,28 +110,35 @@ runs:
       shell: bash
       env:
         PYTHONPATH: ${{ github.action_path }}/../src
+        ACTION_PATH: ${{ github.action_path }}
+        SCHEDULE_PATH: ${{ inputs.schedule-path }}
+        FAIL_ON_WARNING: ${{ inputs.fail-on-warning }}
+        CHECK_ADOPTION: ${{ inputs.check-adoption }}
+        USE_UV_FALLBACK: ${{ inputs.use-uv-fallback }}
+        IGNORE_ERRORS_FOR: ${{ inputs.ignore-errors-for }}
+        PROJECT_FILE: ${{ inputs.project-file }}
       run: |
         CHECK_ARGS=()
-        if [ -n "${{ inputs.schedule-path }}" ]; then
-          CHECK_ARGS+=(--schedule "${{ inputs.schedule-path }}")
-        elif [ -f "${{ github.action_path }}/../schedule.json" ]; then
-          CHECK_ARGS+=(--schedule "${{ github.action_path }}/../schedule.json")
+        if [ -n "$SCHEDULE_PATH" ]; then
+          CHECK_ARGS+=(--schedule "$SCHEDULE_PATH")
+        elif [ -f "$ACTION_PATH/../schedule.json" ]; then
+          CHECK_ARGS+=(--schedule "$ACTION_PATH/../schedule.json")
         fi
 
-        if [ "${{ inputs.fail-on-warning }}" = "true" ]; then
+        if [ "$FAIL_ON_WARNING" = "true" ]; then
           CHECK_ARGS+=(--fail-on-warning)
         fi
-        if [ "${{ inputs.check-adoption }}" = "false" ]; then
+        if [ "$CHECK_ADOPTION" = "false" ]; then
           CHECK_ARGS+=(--no-adoption-check)
         fi
-        if [ "${{ inputs.use-uv-fallback }}" = "false" ]; then
+        if [ "$USE_UV_FALLBACK" = "false" ]; then
           CHECK_ARGS+=(--no-uv-fallback)
         fi
-        if [ -n "${{ inputs.ignore-errors-for }}" ]; then
-          CHECK_ARGS+=(--ignore-errors-for "${{ inputs.ignore-errors-for }}")
+        if [ -n "$IGNORE_ERRORS_FOR" ]; then
+          CHECK_ARGS+=(--ignore-errors-for "$IGNORE_ERRORS_FOR")
         fi
 
-        CHECK_ARGS+=("${{ inputs.project-file }}")
+        CHECK_ARGS+=("$PROJECT_FILE")
         python -m pyhc_actions.phep3.main "${CHECK_ARGS[@]}"
         EXIT_CODE=$?
 
