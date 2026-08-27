@@ -58,4 +58,12 @@ jobs:
           - \`schedule.json\` - Current release schedule for Python and core Scientific Python packages
           EOF
 
-          gh release create "$TAG" schedule.json --title "$TAG" --notes-file release-notes.md
+          # Idempotent: moving the floating major tag (git tag -f v1) re-runs this
+          # workflow for a tag whose release already exists, and `gh release create`
+          # refuses that. Update in place instead, matching the previous behaviour.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --notes-file release-notes.md
+            gh release upload "$TAG" schedule.json --clobber
+          else
+            gh release create "$TAG" schedule.json --title "$TAG" --notes-file release-notes.md
+          fi
