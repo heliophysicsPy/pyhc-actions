@@ -5,18 +5,21 @@ on:
     tags:
       - 'v*'
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.12'
 
@@ -32,24 +35,35 @@ jobs:
           python -c "from pyhc_actions.phep3.pypi_fetcher import update_schedule_file; update_schedule_file('schedule.json')"
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            schedule.json
-          body: |
-            ## PyHC Actions ${{ github.ref_name }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cat > release-notes.md <<EOF
+          ## PyHC Actions $TAG
 
-            ### Usage
+          ### Usage
 
-            **PHEP 3 Compliance Checker:**
-            ```yaml
-            - uses: heliophysicsPy/pyhc-actions/phep3-compliance@${{ github.ref_name }}
-            ```
+          **PHEP 3 Compliance Checker:**
+          \`\`\`yaml
+          - uses: heliophysicsPy/pyhc-actions/phep3-compliance@$TAG
+          \`\`\`
 
-            **PyHC Environment Compatibility Checker:**
-            ```yaml
-            - uses: heliophysicsPy/pyhc-actions/pyhc-env-compat@${{ github.ref_name }}
-            ```
+          **PyHC Environment Compatibility Checker:**
+          \`\`\`yaml
+          - uses: heliophysicsPy/pyhc-actions/pyhc-env-compat@$TAG
+          \`\`\`
 
-            ### Included Files
-            - `schedule.json` - Current release schedule for Python and core Scientific Python packages
+          ### Included Files
+          - \`schedule.json\` - Current release schedule for Python and core Scientific Python packages
+          EOF
+
+          # Idempotent: moving the floating major tag (git tag -f v1) re-runs this
+          # workflow for a tag whose release already exists, and `gh release create`
+          # refuses that. Update in place instead, matching the previous behaviour.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --notes-file release-notes.md
+            gh release upload "$TAG" schedule.json --clobber
+          else
+            gh release create "$TAG" schedule.json --title "$TAG" --notes-file release-notes.md
+          fi

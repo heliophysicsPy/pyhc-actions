@@ -37,7 +37,7 @@ runs:
   using: "composite"
   steps:
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
       with:
         python-version: "3.12"
 
@@ -64,33 +64,39 @@ runs:
       shell: bash
       env:
         PYTHONPATH: ${{ github.action_path }}/../src
+        PACKAGES_URL: ${{ inputs.pyhc-packages-url }}
+        CONSTRAINTS_URL: ${{ inputs.pyhc-constraints-url }}
+        EXTRAS: ${{ inputs.extras }}
+        PROJECT_FILE: ${{ inputs.project-file }}
       run: |
-        # Ensure git history/tags are available for setuptools_scm versioning
+        # Ensure git history/tags are available for setuptools_scm versioning.
+        # `--is-shallow-repository` prints true/false and exits 0 either way, so
+        # test its output rather than its status: `--unshallow` is fatal on an
+        # already-complete checkout. The fetch is best effort -- a package's
+        # version metadata is not worth failing the compatibility check over.
         if [ -d .git ]; then
-          if git rev-parse --is-shallow-repository >/dev/null 2>&1; then
-            git fetch --quiet --unshallow --tags --force --prune
+          if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+            git fetch --quiet --unshallow --tags --force --prune || true
           else
-            git fetch --quiet --tags --force --prune
+            git fetch --quiet --tags --force --prune || true
           fi
         fi
 
-        PACKAGES_ARG=""
-        if [ -n "${{ inputs.pyhc-packages-url }}" ]; then
-          PACKAGES_ARG="--packages ${{ inputs.pyhc-packages-url }}"
+        CHECK_ARGS=()
+        if [ -n "$PACKAGES_URL" ]; then
+          CHECK_ARGS+=(--packages "$PACKAGES_URL")
+        fi
+        if [ -n "$CONSTRAINTS_URL" ]; then
+          CHECK_ARGS+=(--constraints "$CONSTRAINTS_URL")
+        fi
+        if [ -n "$EXTRAS" ]; then
+          CHECK_ARGS+=(--extras "$EXTRAS")
         fi
 
-        CONSTRAINTS_ARG=""
-        if [ -n "${{ inputs.pyhc-constraints-url }}" ]; then
-          CONSTRAINTS_ARG="--constraints ${{ inputs.pyhc-constraints-url }}"
-        fi
-
-        EXTRAS_ARG=""
-        if [ -n "${{ inputs.extras }}" ]; then
-          EXTRAS_ARG="--extras ${{ inputs.extras }}"
-        fi
-
-        python -m pyhc_actions.env_compat.main $PACKAGES_ARG $CONSTRAINTS_ARG $EXTRAS_ARG "${{ inputs.project-file }}"
-        EXIT_CODE=$?
+        # `shell: bash` runs with `-e`, so guard the call to keep the failure
+        # branch below reachable instead of aborting the step immediately.
+        EXIT_CODE=0
+        python -m pyhc_actions.env_compat.main "${CHECK_ARGS[@]}" "$PROJECT_FILE" || EXIT_CODE=$?
 
         if [ $EXIT_CODE -eq 0 ]; then
           echo "compatible=true" >> "$GITHUB_OUTPUT"
