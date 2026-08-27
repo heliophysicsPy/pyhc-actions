@@ -84,6 +84,16 @@ jobs:
             --extras none \
             "$INTEGRATION_FIXTURES/pyproject.toml"
 
+      - name: Test PyHC env compatibility action quotes its inputs
+        uses: ./pyhc-env-compat
+        with:
+          pyhc-packages-url: ${{ github.workspace }}/tests/fixtures/integration/empty-packages.txt
+          pyhc-constraints-url: ${{ github.workspace }}/tests/fixtures/integration/constraints.txt
+          # The space after the comma only survives if the action quotes this
+          # input rather than letting the shell word-split it.
+          extras: "alpha, beta"
+          project-file: ${{ github.workspace }}/tests/fixtures/integration/extras-package/pyproject.toml
+
       - name: Test missing PyHC baseline package attribution
         run: |
           if pyhc-env-compat-check \
