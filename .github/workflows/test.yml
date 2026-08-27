@@ -24,7 +24,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -38,7 +38,7 @@ jobs:
           pytest tests/ -v --cov=src/pyhc_actions --cov-report=xml
 
       - name: Upload coverage
-        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4.6.0
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         if: matrix.python-version == '3.11'
         with:
           files: ./coverage.xml
@@ -57,16 +57,22 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           # Keep in sync with both composite actions.
           version: "0.11.28"
-          enable-cache: true
+          # `auto` lets setup-uv v10 disable the cache for pull_request_target,
+          # workflow_run and release events, where cache poisoning is a real risk.
+          enable-cache: auto
+          # Explicit, not inherited: upstream flipped this default in v9 to cut
+          # re-download load on PyPI. We follow that rather than reclaim ~76 MB
+          # of per-repo cache.
+          prune-cache: false
 
       - name: Install dependencies
         run: |
