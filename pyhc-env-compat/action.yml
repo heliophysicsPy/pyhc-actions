@@ -69,12 +69,16 @@ runs:
         EXTRAS: ${{ inputs.extras }}
         PROJECT_FILE: ${{ inputs.project-file }}
       run: |
-        # Ensure git history/tags are available for setuptools_scm versioning
+        # Ensure git history/tags are available for setuptools_scm versioning.
+        # `--is-shallow-repository` prints true/false and exits 0 either way, so
+        # test its output rather than its status: `--unshallow` is fatal on an
+        # already-complete checkout. The fetch is best effort -- a package's
+        # version metadata is not worth failing the compatibility check over.
         if [ -d .git ]; then
-          if git rev-parse --is-shallow-repository >/dev/null 2>&1; then
-            git fetch --quiet --unshallow --tags --force --prune
+          if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+            git fetch --quiet --unshallow --tags --force --prune || true
           else
-            git fetch --quiet --tags --force --prune
+            git fetch --quiet --tags --force --prune || true
           fi
         fi
 
