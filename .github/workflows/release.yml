@@ -35,24 +35,27 @@ jobs:
           python -c "from pyhc_actions.phep3.pypi_fetcher import update_schedule_file; update_schedule_file('schedule.json')"
 
       - name: Create Release
-        uses: softprops/action-gh-release@fe965f7af51af5f2602596916f38a38df2e33de0 # v3.0.2
-        with:
-          files: |
-            schedule.json
-          body: |
-            ## PyHC Actions ${{ github.ref_name }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cat > release-notes.md <<EOF
+          ## PyHC Actions $TAG
 
-            ### Usage
+          ### Usage
 
-            **PHEP 3 Compliance Checker:**
-            ```yaml
-            - uses: heliophysicsPy/pyhc-actions/phep3-compliance@${{ github.ref_name }}
-            ```
+          **PHEP 3 Compliance Checker:**
+          \`\`\`yaml
+          - uses: heliophysicsPy/pyhc-actions/phep3-compliance@$TAG
+          \`\`\`
 
-            **PyHC Environment Compatibility Checker:**
-            ```yaml
-            - uses: heliophysicsPy/pyhc-actions/pyhc-env-compat@${{ github.ref_name }}
-            ```
+          **PyHC Environment Compatibility Checker:**
+          \`\`\`yaml
+          - uses: heliophysicsPy/pyhc-actions/pyhc-env-compat@$TAG
+          \`\`\`
 
-            ### Included Files
-            - `schedule.json` - Current release schedule for Python and core Scientific Python packages
+          ### Included Files
+          - \`schedule.json\` - Current release schedule for Python and core Scientific Python packages
+          EOF
+
+          gh release create "$TAG" schedule.json --title "$TAG" --notes-file release-notes.md
