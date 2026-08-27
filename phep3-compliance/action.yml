@@ -97,7 +97,13 @@ runs:
       with:
         # Keep in sync with pyhc-env-compat/action.yml and the integration test.
         version: "0.11.28"
-        enable-cache: true
+        # `auto` lets setup-uv v10 disable the cache for pull_request_target,
+        # workflow_run and release events, where cache poisoning is a real risk.
+        enable-cache: auto
+        # Explicit, not inherited: upstream flipped this default in v9 to cut
+        # re-download load on PyPI. We follow that rather than reclaim ~76 MB
+        # of per-repo cache.
+        prune-cache: false
 
     - name: Install dependencies
       shell: bash
