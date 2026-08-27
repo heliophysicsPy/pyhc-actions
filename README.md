@@ -21,11 +21,16 @@ Violations in the base install fail the check. Violations found only in extras a
 ```yaml
 name: PHEP 3 Compliance
 on: [push, pull_request]
+
+permissions: {}
+
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: heliophysicsPy/pyhc-actions/phep3-compliance@v1
 ```
 
@@ -89,11 +94,16 @@ Uses **[uv](https://github.com/astral-sh/uv)** for fast, accurate dependency res
 ```yaml
 name: PyHC Compatibility
 on: [push, pull_request]
+
+permissions: {}
+
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: heliophysicsPy/pyhc-actions/pyhc-env-compat@v1
 ```
 
@@ -150,12 +160,16 @@ on:
     - cron: 0 15 1 1,4,7,10 *
   workflow_dispatch:
 
+permissions: {}
+
 jobs:
   phep3-compliance:
     name: PHEP 3 Compliance
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Check PHEP 3 Compliance
         uses: heliophysicsPy/pyhc-actions/phep3-compliance@v1
@@ -164,7 +178,9 @@ jobs:
     name: PyHC Environment Compatibility
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Check PyHC Environment Compatibility
         uses: heliophysicsPy/pyhc-actions/pyhc-env-compat@v1
