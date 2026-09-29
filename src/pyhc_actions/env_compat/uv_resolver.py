@@ -959,9 +959,10 @@ def _extract_conflict_from_error(stderr: str) -> Conflict | None:
     in the error, even if they don't match our expected patterns.
     """
     # Look for patterns like "depends on numpy<2" or "requires numpy>=2.0"
-    # Note: [<>=!~]+ handles multi-char operators like >=, <=, !=, ==, ~=
+    # Keep comma-separated clauses, including operators like != and ~=.
     pkg_version_pattern = re.compile(
-        r"(?:depends\s+on|requires?)\s+([a-zA-Z0-9_-]+)(\[[^\]]+\])?([<>=!~]+[0-9][^\s,]*)",
+        r"(?:depends\s+on|requires?)\s+([a-zA-Z0-9_-]+)(\[[^\]]+\])?"
+        r"([<>=!~]+[0-9][^\s,]*(?:,[<>=!~]+[0-9][^\s,]*)*)",
         re.IGNORECASE,
     )
 

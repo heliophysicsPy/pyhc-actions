@@ -169,8 +169,35 @@ error: No solution found when resolving dependencies:
         conflicts = parse_uv_error(stderr)
         assert len(conflicts) == 1
         assert conflicts[0].package == "scipy"
-        # Should capture the full version spec including comma-separated parts
-        assert "1.5" in conflicts[0].your_requirement or "2.0" in conflicts[0].pyhc_requirement
+        assert conflicts[0].your_requirement == "scipy>=1.5,<2.0"
+        assert conflicts[0].pyhc_requirement == "scipy>=2.0,<3.0"
+
+    def test_fallback_preserves_full_requirement_from_uv(self):
+        """Keep every bound in uv's multi-line conflict explanation."""
+        stderr = """
+× No solution found when resolving dependencies:
+╰─▶ Because only pyhc-issue-28-repro==0.0.1 is available and
+    pyhc-issue-28-repro==0.0.1 depends on astropy>=6.1.3,<8, we can conclude
+    that all versions of pyhc-issue-28-repro depend on astropy>=6.1.3,<8.
+    And because you require astropy>=8.0.0 and pyhc-issue-28-repro, we can
+    conclude that your requirements are unsatisfiable.
+"""
+        conflicts = parse_uv_error(stderr, package_name="pyhc-issue-28-repro")
+        assert len(conflicts) == 1
+        assert conflicts[0].your_requirement == "astropy>=6.1.3,<8"
+        assert conflicts[0].pyhc_requirement == "astropy>=8.0.0"
+
+    def test_fallback_preserves_not_equal_specifier(self):
+        """Keep != clauses when the fallback parses a compound requirement."""
+        stderr = """
+× No solution found when resolving dependencies:
+╰─▶ Because demo depends on astropy>=6.1.3,!=7.0,<8 while the environment
+    requires astropy>=8.0.0,!=8.1.0, the requirements are unsatisfiable.
+"""
+        conflicts = parse_uv_error(stderr)
+        assert len(conflicts) == 1
+        assert conflicts[0].your_requirement == "astropy>=6.1.3,!=7.0,<8"
+        assert conflicts[0].pyhc_requirement == "astropy>=8.0.0,!=8.1.0"
 
     def test_multiple_conflicts(self):
         """Test parsing multiple package conflicts."""
