@@ -417,11 +417,14 @@ def check_compatibility(
             pyhc_requirements_for_resolution.append(req)
             f.write(f"{req}\n")
 
-        # Add the package being checked (use -e for local editable install)
-        editable_spec = f"-e {package_path}"
+        # Add the package being checked as a regular (non-editable) local path.
+        # Editable specs need the PEP 660 build_editable hook, which legacy build
+        # backends such as Poetry's poetry.masonry.api don't provide; every PEP 517
+        # backend can build regular wheel metadata.
+        package_spec = package_path
         if extra:
-            editable_spec = f"-e {package_path}[{extra}]"
-        f.write(f"{editable_spec}\n")
+            package_spec = f"{package_path}[{extra}]"
+        f.write(f"{package_spec}\n")
 
         temp_packages = f.name
 
@@ -449,7 +452,8 @@ def check_compatibility(
             # Parse and display resolved package versions
             resolved = parse_resolved_versions(result.stdout)
 
-            # Add the package being checked (uv doesn't output editable installs)
+            # Add the package being checked (uv echoes the bare local path back,
+            # which parse_resolved_versions skips)
             if package_name:
                 resolved[_canonicalize_package_name(package_name) or package_name.lower()] = (
                     f"{package_name} @ {package_path}"

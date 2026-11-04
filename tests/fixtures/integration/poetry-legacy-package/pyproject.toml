@@ -1,0 +1,15 @@
+# Fixture for packages that still use Poetry's legacy build backend. Its
+# poetry.masonry.api has no PEP 660 build_editable hook, so the env compat check
+# must resolve the package as a regular local path rather than an editable one.
+[build-system]
+requires = ["poetry>=0.12"]
+build-backend = "poetry.masonry.api"
+
+[tool.poetry]
+name = "pyhc-actions-poetry-legacy-integration-test"
+version = "1.0.0"
+description = "Poetry legacy build backend fixture for pyhc-actions"
+authors = ["PyHC Community <pyhc@lasp.colorado.edu>"]
+
+[tool.poetry.dependencies]
+python = ">=3.11"

@@ -1434,24 +1434,85 @@ setup(
             # Should be the package directory, not its parent
             assert package_path == str(tmpdir_path.resolve())
 
-    def test_editable_flag_format(self):
-        """Test that package specs include -e flag for local packages.
+    @staticmethod
+    def _capture_package_specs(monkeypatch, pyproject_path, extra=None):
+        """Run check_compatibility and return the package specs handed to uv."""
+        captured: dict[str, str] = {}
 
-        This verifies the format used in the temp package spec file.
-        """
-        import tempfile
-        from pathlib import Path
+        class DummyResult:
+            returncode = 0
+            stdout = ""
+            stderr = ""
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            package_path = Path(tmpdir).resolve()
+        def fake_run(cmd, *args, **kwargs):
+            req_file = None
+            for token in cmd:
+                if isinstance(token, str) and token.endswith(".txt") and Path(token).exists():
+                    req_file = token
+                    break
+            assert req_file is not None
+            with open(req_file) as f:
+                captured["text"] = f.read()
+            return DummyResult()
 
-            # The format we write to temporary package specs
-            req_line = f"-e {package_path}\n"
+        monkeypatch.setattr("pyhc_actions.env_compat.uv_resolver.find_uv", lambda: "/usr/bin/uv")
+        monkeypatch.setattr("pyhc_actions.env_compat.uv_resolver.subprocess.run", fake_run)
+        # Keep projects without [project].name from shelling out for metadata.
+        monkeypatch.setattr(
+            "pyhc_actions.phep3.metadata_extractor.extract_metadata_with_uv",
+            lambda *args, **kwargs: None,
+        )
 
-            # Verify format
-            assert req_line.startswith("-e ")
-            assert str(package_path) in req_line
-            assert req_line.endswith("\n")
+        reporter = Reporter(title="Test", output=StringIO(), github_actions=False)
+        ok, _conflicts = check_compatibility(
+            pyproject_path=pyproject_path,
+            pyhc_packages=["numpy>=1.20"],
+            pyhc_constraints=[],
+            pyhc_python="3.12.0",
+            extra=extra,
+            reporter=reporter,
+        )
+
+        assert ok is True
+        return captured["text"].splitlines()
+
+    def test_package_spec_is_not_editable_for_legacy_poetry_backend(
+        self, tmp_path, monkeypatch
+    ):
+        """Legacy Poetry backends lack build_editable, so the local spec must not use -e."""
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            """
+[build-system]
+requires = ["poetry>=0.12"]
+build-backend = "poetry.masonry.api"
+
+[tool.poetry]
+name = "legacy-poetry-demo"
+version = "1.0.0"
+"""
+        )
+
+        specs = self._capture_package_specs(monkeypatch, pyproject)
+
+        assert specs == ["numpy>=1.20", str(tmp_path.resolve())]
+        assert not any(spec.startswith("-e") for spec in specs)
+
+    def test_package_spec_with_extra_is_not_editable(self, tmp_path, monkeypatch):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            """
+[project]
+name = "demo"
+
+[project.optional-dependencies]
+image = ["pillow"]
+"""
+        )
+
+        specs = self._capture_package_specs(monkeypatch, pyproject, extra="image")
+
+        assert specs == ["numpy>=1.20", f"{tmp_path.resolve()}[image]"]
 
     def test_cwd_with_directory_path(self):
         """Test that cwd calculation works for directory paths.
