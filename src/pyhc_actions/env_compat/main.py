@@ -39,6 +39,7 @@ def main(args: list[str] | None = None) -> int:
 Examples:
   %(prog)s                              # Check ./pyproject.toml
   %(prog)s path/to/pyproject.toml       # Check specific file
+  %(prog)s path/to/project              # Check a project directory
   %(prog)s --packages local.txt         # Use local packages file
   %(prog)s --constraints local.txt      # Use local constraints file
         """,
@@ -48,7 +49,7 @@ Examples:
         "project_file",
         nargs="?",
         default="pyproject.toml",
-        help="Path to pyproject.toml file (default: pyproject.toml)",
+        help="Path to pyproject.toml file or project directory (default: pyproject.toml)",
     )
 
     parser.add_argument(
@@ -92,21 +93,35 @@ Examples:
             print("Install uv: curl -LsSf https://astral.sh/uv/install.sh | sh")
             return 1
 
-    # Check that project file exists
+    # Check that project file exists (a directory means its pyproject.toml)
     project_path = Path(parsed_args.project_file)
+    if project_path.is_dir():
+        project_dir = project_path
+        project_path = project_dir / "pyproject.toml"
+    elif project_path.name == "pyproject.toml":
+        project_dir = project_path.parent
+    else:
+        project_dir = None
+
     if not project_path.exists():
         # If pyproject.toml doesn't exist, check for setup.py/setup.cfg
         # The checker can extract metadata from these using the project directory
-        project_dir = project_path.parent if project_path.name == "pyproject.toml" else Path(".")
-        setup_py = project_dir / "setup.py"
-        setup_cfg = project_dir / "setup.cfg"
+        has_setup_files = project_dir is not None and (
+            (project_dir / "setup.py").exists() or (project_dir / "setup.cfg").exists()
+        )
 
-        if setup_py.exists() or setup_cfg.exists():
+        if has_setup_files:
             # Pass project directory instead of pyproject.toml path
             project_path = project_dir
+        elif project_dir is not None and project_dir.is_dir():
+            print(
+                f"Error: No packaging metadata found in {project_dir.resolve()}",
+                file=sys.stderr,
+            )
+            print("Hint: Expected pyproject.toml, setup.py, or setup.cfg", file=sys.stderr)
+            return 1
         else:
             print(f"Error: File not found: {project_path}", file=sys.stderr)
-            print(f"Hint: No setup.py or setup.cfg found for fallback", file=sys.stderr)
             return 1
 
     # Create reporter
