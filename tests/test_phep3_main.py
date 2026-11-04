@@ -168,7 +168,14 @@ class TestScheduleSelection:
 
     def test_downloads_latest_release_schedule(self, project, monkeypatch, captured, capsys):
         downloaded = _schedule()
-        monkeypatch.setattr(phep3_main, "fetch_latest_schedule", lambda: downloaded)
+        printed_before_download = []
+
+        def fake_fetch():
+            # The note must already be out before a slow download starts
+            printed_before_download.append(capsys.readouterr().out)
+            return downloaded
+
+        monkeypatch.setattr(phep3_main, "fetch_latest_schedule", fake_fetch)
         monkeypatch.setattr(phep3_main, "load_bundled_schedule", _fail)
 
         exit_code = phep3_main.main([str(project)])
@@ -176,7 +183,10 @@ class TestScheduleSelection:
         assert exit_code == 0
         assert captured["schedule"] is downloaded
         assert captured["schedule_path"] is None
-        assert "latest pyhc-actions release" in capsys.readouterr().out
+        assert printed_before_download == [
+            "Note: Downloading schedule.json from the latest pyhc-actions release...\n"
+        ]
+        assert "Could not download" not in capsys.readouterr().out
 
     def test_falls_back_to_bundled_schedule_when_offline(self, project, monkeypatch, captured, capsys):
         def offline():
@@ -257,17 +267,18 @@ class TestScheduleSources:
             def json(self):
                 return _schedule().to_dict()
 
-        urls = []
+        calls = []
 
         def fake_get(url, timeout):
-            urls.append(url)
+            calls.append((url, timeout))
             return FakeResponse()
 
         monkeypatch.setattr(schedule_module.requests, "get", fake_get)
 
         schedule = schedule_module.fetch_latest_schedule()
 
-        assert urls == [schedule_module.SCHEDULE_RELEASE_URL]
+        # Short (connect, read) timeouts so an unresponsive server falls back quickly
+        assert calls == [(schedule_module.SCHEDULE_RELEASE_URL, (5, 10))]
         assert schedule.generated_at == datetime(2026, 11, 1, tzinfo=timezone.utc)
 
     def test_bundled_schedule_prefers_package_data(self, tmp_path, monkeypatch):

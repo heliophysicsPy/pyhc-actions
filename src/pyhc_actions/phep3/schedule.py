@@ -328,7 +328,8 @@ def fetch_latest_schedule(url: str | None = None) -> Schedule:
         requests.RequestException: If the download fails
         ValueError, KeyError, TypeError: If the response is not a valid schedule
     """
-    response = requests.get(url or SCHEDULE_RELEASE_URL, timeout=30)
+    # (connect, read) seconds, kept short since the CLI has a bundled fallback
+    response = requests.get(url or SCHEDULE_RELEASE_URL, timeout=(5, 10))
     response.raise_for_status()
     return Schedule.from_dict(response.json())
 

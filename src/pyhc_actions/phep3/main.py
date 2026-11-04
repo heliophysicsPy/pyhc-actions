@@ -26,6 +26,8 @@ def _load_default_schedule() -> Schedule | None:
     Returns:
         Schedule, or None if neither source is available
     """
+    # Flushed so a slow network doesn't look like a hang when stdout is piped
+    print("Note: Downloading schedule.json from the latest pyhc-actions release...", flush=True)
     try:
         schedule = fetch_latest_schedule()
     except (requests.RequestException, ValueError, KeyError, TypeError) as e:
@@ -39,9 +41,6 @@ def _load_default_schedule() -> Schedule | None:
                 f"using the copy bundled with pyhc-actions "
                 f"(generated {schedule.generated_at:%Y-%m-%d})."
             )
-        return schedule
-
-    print("Note: Using schedule.json from the latest pyhc-actions release.")
     return schedule
 
 
