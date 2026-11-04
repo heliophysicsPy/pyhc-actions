@@ -38,7 +38,7 @@ jobs:
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `project-file` | Path to pyproject.toml | `pyproject.toml` |
+| `project-file` | Path to the project directory or its `pyproject.toml`; only needed if the project isn't at the repository root | `pyproject.toml` |
 | `fail-on-warning` | Treat warnings as errors | `false` |
 | `check-adoption` | Check 6-month adoption rule | `true` |
 | `schedule-path` | Path to schedule.json | (auto-download) |
@@ -111,7 +111,7 @@ jobs:
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `project-file` | Path to pyproject.toml | `pyproject.toml` |
+| `project-file` | Path to the project directory or its `pyproject.toml`; only needed if the project isn't at the repository root | `pyproject.toml` |
 | `pyhc-packages-url` | URL to PyHC packages.txt | (official GitHub URL) |
 | `pyhc-constraints-url` | URL to PyHC constraints.txt | (official GitHub URL) |
 | `extras` | Extras selection: `auto`, `none`, or comma-separated list | `auto` |
