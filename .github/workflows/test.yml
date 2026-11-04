@@ -100,6 +100,14 @@ jobs:
             --extras none \
             "$INTEGRATION_FIXTURES/pyproject.toml"
 
+      - name: Test PyHC env compatibility check with legacy Poetry backend
+        run: |
+          pyhc-env-compat-check \
+            --packages "$INTEGRATION_FIXTURES/empty-packages.txt" \
+            --constraints "$INTEGRATION_FIXTURES/constraints.txt" \
+            --extras none \
+            "$INTEGRATION_FIXTURES/poetry-legacy-package/pyproject.toml"
+
       - name: Test PyHC env compatibility action quotes its inputs
         uses: ./pyhc-env-compat
         with:

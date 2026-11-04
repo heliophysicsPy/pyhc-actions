@@ -146,7 +146,7 @@ def load_pyhc_constraints(source: str | Path | None = None) -> list[str]:
 
 
 def get_package_from_pyproject(pyproject_path: Path | str) -> str:
-    """Get package directory path for local editable install specs.
+    """Get package directory path for local install specs.
 
     Handles both file paths (pyproject.toml) and directory paths (for setup.py
     packages where main.py passes the project directory directly).
