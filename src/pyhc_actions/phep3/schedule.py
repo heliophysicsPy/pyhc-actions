@@ -5,14 +5,22 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from importlib.resources import files
 from pathlib import Path
 from typing import TypedDict
+
+import requests
 
 from pyhc_actions.phep3.config import (
     PYTHON_RELEASES,
     PYTHON_SUPPORT_MONTHS,
     PACKAGE_SUPPORT_MONTHS,
     ADOPTION_MONTHS,
+)
+
+# schedule.json published with the latest pyhc-actions release (what the GitHub Action uses)
+SCHEDULE_RELEASE_URL = (
+    "https://github.com/heliophysicsPy/pyhc-actions/releases/latest/download/schedule.json"
 )
 
 
@@ -305,6 +313,44 @@ def create_python_schedule() -> dict[str, VersionSchedule]:
             )
 
     return schedule
+
+
+def fetch_latest_schedule(url: str | None = None) -> Schedule:
+    """Download the schedule.json published with the latest pyhc-actions release.
+
+    Args:
+        url: URL to fetch from (default: latest GitHub release asset)
+
+    Returns:
+        Parsed Schedule
+
+    Raises:
+        requests.RequestException: If the download fails
+        ValueError, KeyError, TypeError: If the response is not a valid schedule
+    """
+    # (connect, read) seconds, kept short since the CLI has a bundled fallback
+    response = requests.get(url or SCHEDULE_RELEASE_URL, timeout=(5, 10))
+    response.raise_for_status()
+    return Schedule.from_dict(response.json())
+
+
+def load_bundled_schedule() -> Schedule | None:
+    """Load the schedule.json that ships with pyhc-actions.
+
+    Wheels include it as package data (see pyproject.toml); source checkouts
+    and editable installs read the copy at the repository root.
+
+    Returns:
+        Parsed Schedule, or None if no bundled copy exists
+    """
+    candidates = [
+        files("pyhc_actions.phep3") / "schedule.json",
+        Path(__file__).parent.parent.parent.parent / "schedule.json",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return Schedule.from_dict(json.loads(candidate.read_text()))
+    return None
 
 
 def calculate_dates(

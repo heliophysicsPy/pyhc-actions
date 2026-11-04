@@ -72,7 +72,12 @@ def extract_metadata_with_uv(
     Returns:
         PackageMetadata or None if extraction fails
     """
-    project_path = Path(project_path)
+    # Absolute, because uv runs with cwd=project_path: a relative path would not
+    # resolve there, and uv would then treat a bare name like "six" as a PyPI
+    # requirement and report that package's metadata instead
+    project_path = Path(project_path).resolve()
+    if not project_path.is_dir():
+        return None
 
     if not check_uv_available():
         return None
