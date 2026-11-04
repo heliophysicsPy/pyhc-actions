@@ -1554,3 +1554,105 @@ dependencies = []
         assert exit_code == 0
         assert "ignore_errors_for" in captured_kwargs
         assert captured_kwargs["ignore_errors_for"] == {"numpy", "xarray"}
+
+
+class TestMissingScheduleData:
+    """Tests for core packages the schedule has no release data for."""
+
+    @pytest.fixture
+    def schedule(self):
+        """Create a test schedule where numpy 2.2 must still be supported."""
+        now = datetime.now(timezone.utc)
+        return Schedule(
+            generated_at=now,
+            python={
+                "3.13": VersionSchedule(
+                    version="3.13",
+                    release_date=now - timedelta(days=400),
+                    drop_date=now + timedelta(days=695),
+                    support_by=now - timedelta(days=217),
+                ),
+            },
+            packages={
+                "numpy": {
+                    "2.2": VersionSchedule(
+                        version="2.2",
+                        release_date=now - timedelta(days=300),
+                        drop_date=now + timedelta(days=430),
+                        support_by=now - timedelta(days=117),
+                    ),
+                    "2.3": VersionSchedule(
+                        version="2.3",
+                        release_date=now - timedelta(days=100),
+                        drop_date=now + timedelta(days=630),
+                        support_by=now + timedelta(days=83),
+                    ),
+                },
+            },
+        )
+
+    @pytest.fixture
+    def run_cli(self, tmp_path, monkeypatch):
+        """Run phep3-check on a numpy>=2.3 project with the given schedule."""
+        monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text("""
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.13"
+dependencies = ["numpy>=2.3"]
+""")
+
+        def run(schedule, *args):
+            schedule_path = tmp_path / "schedule.json"
+            schedule_path.write_text(json.dumps(schedule.to_dict()))
+            return phep3_main.main([
+                str(pyproject),
+                "--schedule", str(schedule_path),
+                "--no-uv-fallback",
+                *args,
+            ])
+
+        return run
+
+    def test_complete_schedule_reports_error(self, schedule, run_cli, capsys):
+        """Test numpy>=2.3 is an error when numpy 2.2 must still be supported."""
+        assert run_cli(schedule) == 1
+        assert "[ERROR] numpy>=2.3 drops support for numpy 2.2 too early" in capsys.readouterr().out
+
+    @pytest.mark.parametrize(
+        "args, exit_code", [([], 0), (["--fail-on-warning"], 1)]
+    )
+    def test_empty_package_entry_warns(self, schedule, run_cli, capsys, args, exit_code):
+        """Test a schedule with no numpy data warns instead of silently passing."""
+        schedule.packages["numpy"] = {}
+
+        assert run_cli(schedule, *args) == exit_code
+        out = capsys.readouterr().out
+        assert "[WARN] numpy>=2.3 was not checked: schedule has no numpy release data" in out
+
+    def test_core_package_missing_from_schedule_warns(self, schedule):
+        """Test a core package absent from the schedule warns in base and extras."""
+        content = """
+[project]
+name = "test-package"
+version = "1.0.0"
+requires-python = ">=3.13"
+dependencies = ["numpy>=2.2", "scipy>=1.15"]
+
+[project.optional-dependencies]
+viz = ["matplotlib>=3.10"]
+"""
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".toml", delete=False
+        ) as f:
+            f.write(content)
+            f.flush()
+
+            reporter = Reporter()
+            passed = check_compliance(f.name, schedule, reporter, use_uv_fallback=False)
+
+            assert passed is True
+            skipped = {(w.package, w.context) for w in reporter.warnings if "was not checked" in w.message}
+            assert skipped == {("scipy", ""), ("matplotlib", "viz")}

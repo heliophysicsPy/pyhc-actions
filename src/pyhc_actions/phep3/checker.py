@@ -331,12 +331,6 @@ def _check_dependency(
     if dep.is_url:
         return
 
-    # Get the normalized package name for schedule lookup
-    pkg_name = _get_schedule_package_name(dep.name, schedule)
-    if not pkg_name:
-        # Package not in schedule - can't check
-        return
-
     bounds = extract_version_bounds(dep.specifier)
 
     marker_applicability = _get_python_marker_applicability(
@@ -374,6 +368,18 @@ def _check_dependency(
                 suggestion=suggestion,
                 context=context if context != "base" else "",
             )
+
+    # Get the normalized package name for schedule lookup
+    pkg_name = _get_schedule_package_name(dep.name, schedule)
+    if not pkg_name or not schedule.packages[pkg_name]:
+        # No release data to check against - say so rather than pass silently
+        _report_warning(
+            package=dep.name,
+            message=f"{dep.raw} was not checked: schedule has no {dep.name} release data",
+            details="PHEP 3 support-window checks for this core package were skipped",
+            suggestion="Use a complete schedule.json, such as the latest pyhc-actions release's",
+        )
+        return
 
     # Check for upper bound / exact constraints (warning)
     if bounds.has_max_constraint:

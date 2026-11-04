@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import collections
+import time
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -13,6 +14,10 @@ from pyhc_actions.phep3.schedule import Schedule, VersionSchedule, create_python
 
 
 PYPI_SIMPLE_URL = "https://pypi.org/simple/{package}"
+
+# A failed fetch aborts schedule generation, so retry brief PyPI outages first
+FETCH_ATTEMPTS = 3
+RETRY_DELAY_SECONDS = 5
 
 
 def fetch_package_releases(
@@ -28,6 +33,7 @@ def fetch_package_releases(
 
     Returns:
         Dictionary mapping version strings to VersionSchedule objects
+        (empty if PyPI couldn't be reached after FETCH_ATTEMPTS tries)
     """
     releases = {}
 
@@ -38,17 +44,24 @@ def fetch_package_releases(
     )
     cutoff = current_quarter_start - timedelta(days=270)  # ~9 months
 
-    try:
-        response = requests.get(
-            PYPI_SIMPLE_URL.format(package=package),
-            headers={"Accept": "application/vnd.pypi.simple.v1+json"},
-            timeout=30,
-        )
-        response.raise_for_status()
-        data = response.json()
-    except requests.RequestException as e:
-        print(f"Warning: Could not fetch release data for {package}: {e}")
-        return releases
+    for attempt in range(1, FETCH_ATTEMPTS + 1):
+        try:
+            response = requests.get(
+                PYPI_SIMPLE_URL.format(package=package),
+                headers={"Accept": "application/vnd.pypi.simple.v1+json"},
+                timeout=30,
+            )
+            response.raise_for_status()
+            data = response.json()
+            break
+        except requests.RequestException as e:
+            print(
+                f"Warning: Could not fetch release data for {package} "
+                f"(attempt {attempt}/{FETCH_ATTEMPTS}): {e}"
+            )
+            if attempt == FETCH_ATTEMPTS:
+                return releases
+            time.sleep(RETRY_DELAY_SECONDS * attempt)
 
     # Group upload times by version
     file_dates: dict[Version, list[datetime]] = collections.defaultdict(list)
@@ -113,6 +126,11 @@ def fetch_all_core_packages() -> dict[str, dict[str, VersionSchedule]]:
 
     Returns:
         Dictionary mapping package names to version schedules
+
+    Raises:
+        RuntimeError: If any package has no release data. The checker can't
+            check a package with no data, so an incomplete schedule must
+            never be saved.
     """
     packages = {}
 
@@ -121,6 +139,13 @@ def fetch_all_core_packages() -> dict[str, dict[str, VersionSchedule]]:
         releases = fetch_package_releases(package)
         packages[package] = releases
         print(f"found {len(releases)} versions")
+
+    missing = [package for package, releases in packages.items() if not releases]
+    if missing:
+        raise RuntimeError(
+            f"No release data for {', '.join(missing)}; "
+            "not generating an incomplete schedule"
+        )
 
     return packages
 
