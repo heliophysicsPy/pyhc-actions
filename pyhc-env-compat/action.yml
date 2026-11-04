@@ -9,7 +9,7 @@ branding:
 
 inputs:
   project-file:
-    description: "Path to pyproject.toml file"
+    description: "Path to the project directory or its pyproject.toml; only needed if the project isn't at the repository root"
     required: false
     default: "pyproject.toml"
   pyhc-packages-url:

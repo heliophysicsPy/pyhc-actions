@@ -15,6 +15,7 @@ Validates package requirements against [PHEP 3](https://github.com/heliophysicsP
 
 Violations in the base install fail the check. Violations found only in extras are reported as warnings.
 
+To run this check locally, see [Local Usage](#local-usage).
 
 #### Usage
 
@@ -38,7 +39,7 @@ jobs:
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `project-file` | Path to pyproject.toml | `pyproject.toml` |
+| `project-file` | Path to the project directory or its `pyproject.toml`; only needed if the project isn't at the repository root | `pyproject.toml` |
 | `fail-on-warning` | Treat warnings as errors | `false` |
 | `check-adoption` | Check 6-month adoption rule | `true` |
 | `schedule-path` | Path to schedule.json | (auto-download) |
@@ -89,6 +90,8 @@ Conflicts in the base install fail the check. Conflicts found only in extras are
 
 Uses **[uv](https://github.com/astral-sh/uv)** for fast, accurate dependency resolution that catches transitive conflicts.
 
+To run this check locally, see [Local Usage](#local-usage).
+
 #### Usage
 
 ```yaml
@@ -111,7 +114,7 @@ jobs:
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `project-file` | Path to pyproject.toml | `pyproject.toml` |
+| `project-file` | Path to the project directory or its `pyproject.toml`; only needed if the project isn't at the repository root | `pyproject.toml` |
 | `pyhc-packages-url` | URL to PyHC packages.txt | (official GitHub URL) |
 | `pyhc-constraints-url` | URL to PyHC constraints.txt | (official GitHub URL) |
 | `extras` | Extras selection: `auto`, `none`, or comma-separated list | `auto` |
@@ -188,12 +191,17 @@ jobs:
 
 ### Local Usage
 
-You can also run the checks locally:
+You can also run the checks locally. pyhc-actions isn't published on PyPI, so install it from GitHub:
 
 ```bash
-# Install
-pip install -e .
+pip install git+https://github.com/heliophysicsPy/pyhc-actions.git@v1
+```
 
+The PyHC Environment compatibility check also requires [uv](https://docs.astral.sh/uv/getting-started/installation/).
+
+Run the checks from your package's root directory:
+
+```bash
 # Run PHEP 3 check
 phep3-check pyproject.toml
 
