@@ -15,6 +15,7 @@ Validates package requirements against [PHEP 3](https://github.com/heliophysicsP
 
 Violations in the base install fail the check. Violations found only in extras are reported as warnings.
 
+To run this check locally, see [Local Usage](#local-usage).
 
 #### Usage
 
@@ -88,6 +89,8 @@ Detects dependency conflicts with the [PyHC Environment](https://github.com/heli
 Conflicts in the base install fail the check. Conflicts found only in extras are reported as warnings.
 
 Uses **[uv](https://github.com/astral-sh/uv)** for fast, accurate dependency resolution that catches transitive conflicts.
+
+To run this check locally, see [Local Usage](#local-usage).
 
 #### Usage
 
@@ -188,12 +191,17 @@ jobs:
 
 ### Local Usage
 
-You can also run the checks locally:
+You can also run the checks locally. pyhc-actions isn't published on PyPI, so install it from GitHub; `@v1` gets the same release that workflows using `@v1` run:
 
 ```bash
-# Install
-pip install -e .
+pip install git+https://github.com/heliophysicsPy/pyhc-actions.git@v1
+```
 
+The PyHC Environment compatibility check also requires [uv](https://docs.astral.sh/uv/getting-started/installation/).
+
+Run the checks from your package's root directory:
+
+```bash
 # Run PHEP 3 check
 phep3-check pyproject.toml
 
