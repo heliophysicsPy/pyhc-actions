@@ -191,7 +191,7 @@ jobs:
 
 ### Local Usage
 
-You can also run the checks locally. pyhc-actions isn't published on PyPI, so install it from GitHub; `@v1` gets the same release that workflows using `@v1` run:
+You can also run the checks locally. pyhc-actions isn't published on PyPI, so install it from GitHub:
 
 ```bash
 pip install git+https://github.com/heliophysicsPy/pyhc-actions.git@v1
