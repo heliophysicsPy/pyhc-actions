@@ -1593,18 +1593,18 @@ class TestMissingScheduleData:
 
     @pytest.fixture
     def run_cli(self, tmp_path, monkeypatch):
-        """Run phep3-check on a numpy>=2.3 project with the given schedule."""
+        """Run phep3-check on a Python 3.13+ project with the given schedule."""
         monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
-        pyproject = tmp_path / "pyproject.toml"
-        pyproject.write_text("""
+
+        def run(schedule, requirement, *args):
+            pyproject = tmp_path / "pyproject.toml"
+            pyproject.write_text(f"""
 [project]
 name = "test-package"
 version = "1.0.0"
 requires-python = ">=3.13"
-dependencies = ["numpy>=2.3"]
+{requirement}
 """)
-
-        def run(schedule, *args):
             schedule_path = tmp_path / "schedule.json"
             schedule_path.write_text(json.dumps(schedule.to_dict()))
             return phep3_main.main([
@@ -1618,19 +1618,29 @@ dependencies = ["numpy>=2.3"]
 
     def test_complete_schedule_reports_error(self, schedule, run_cli, capsys):
         """Test numpy>=2.3 is an error when numpy 2.2 must still be supported."""
-        assert run_cli(schedule) == 1
+        assert run_cli(schedule, 'dependencies = ["numpy>=2.3"]') == 1
         assert "[ERROR] numpy>=2.3 drops support for numpy 2.2 too early" in capsys.readouterr().out
 
     @pytest.mark.parametrize(
-        "args, exit_code", [([], 0), (["--fail-on-warning"], 1)]
+        "requirement, args, exit_code",
+        [
+            ('dependencies = ["numpy>=2.3"]', [], 0),
+            ('dependencies = ["numpy>=2.3"]', ["--fail-on-warning"], 1),
+            ('dependencies = ["numpy>=2.3"]', ["--no-adoption-check", "--fail-on-warning"], 1),
+            ('[project.optional-dependencies]\nviz = ["numpy>=2.3"]', ["--fail-on-warning"], 1),
+        ],
+        ids=["base", "fail-on-warning", "no-adoption-check", "extra"],
     )
-    def test_empty_package_entry_warns(self, schedule, run_cli, capsys, args, exit_code):
+    def test_empty_package_entry_warns(
+        self, schedule, run_cli, capsys, requirement, args, exit_code
+    ):
         """Test a schedule with no numpy data warns instead of silently passing."""
         schedule.packages["numpy"] = {}
 
-        assert run_cli(schedule, *args) == exit_code
+        assert run_cli(schedule, requirement, *args) == exit_code
         out = capsys.readouterr().out
         assert "[WARN] numpy>=2.3 was not checked: schedule has no numpy release data" in out
+        assert ("Extras: viz" in out) == ("viz" in requirement)
 
     def test_core_package_missing_from_schedule_warns(self, schedule):
         """Test a core package absent from the schedule warns in base and extras."""
