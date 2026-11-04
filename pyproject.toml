@@ -32,6 +32,10 @@ pyhc-env-compat-check = "pyhc_actions.env_compat.main:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/pyhc_actions"]
 
+# Offline fallback for phep3-check when the latest release's schedule.json can't be downloaded
+[tool.hatch.build.targets.wheel.force-include]
+"schedule.json" = "pyhc_actions/phep3/schedule.json"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

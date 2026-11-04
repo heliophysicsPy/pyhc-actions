@@ -252,3 +252,44 @@ numpy = "^1.20"
             # If uv isn't available or can't extract, returns None
             # Either way, shouldn't crash
             assert result is None or result.extracted_via == "uv"
+
+
+class TestExtractMetadataWithUvPaths:
+    """Tests for the project path extract_metadata_with_uv hands to uv."""
+
+    def test_relative_path_is_passed_to_uv_as_absolute(self, tmp_path, monkeypatch):
+        """uv runs with cwd=project_path, so a relative "six" would install six from PyPI."""
+        import subprocess
+        from pyhc_actions.phep3 import metadata_extractor
+
+        (tmp_path / "six").mkdir()
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(metadata_extractor, "check_uv_available", lambda: True)
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            # Let venv creation succeed, then stop at the install step
+            returncode = 1 if cmd[:3] == ["uv", "pip", "install"] else 0
+            return subprocess.CompletedProcess(cmd, returncode, "[]", "")
+
+        monkeypatch.setattr(metadata_extractor.subprocess, "run", fake_run)
+
+        assert metadata_extractor.extract_metadata_with_uv("six") is None
+
+        install_cmd, install_kwargs = next(
+            (cmd, kwargs) for cmd, kwargs in calls if cmd[:3] == ["uv", "pip", "install"]
+        )
+        expected = str((tmp_path / "six").resolve())
+        assert install_cmd[-1] == expected
+        assert install_kwargs["cwd"] == expected
+
+    def test_missing_directory_returns_none_without_running_uv(self, tmp_path, monkeypatch):
+        from pyhc_actions.phep3 import metadata_extractor
+
+        def fail(*_args, **_kwargs):
+            raise AssertionError("uv should not run")
+
+        monkeypatch.setattr(metadata_extractor.subprocess, "run", fail)
+
+        assert metadata_extractor.extract_metadata_with_uv(tmp_path / "missing") is None

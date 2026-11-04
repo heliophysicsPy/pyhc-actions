@@ -699,6 +699,7 @@ def check_pyproject(
     fail_on_warning: bool = False,
     use_uv_fallback: bool = True,
     ignore_errors_for: set[str] | None = None,
+    schedule: Schedule | None = None,
 ) -> tuple[bool, Reporter]:
     """High-level function to check a pyproject.toml file.
 
@@ -709,6 +710,7 @@ def check_pyproject(
         fail_on_warning: Whether warnings should cause failure
         use_uv_fallback: Whether to use uv for projects with non-PEP 621 metadata
         ignore_errors_for: Set of package names (lowercase) to treat errors as warnings
+        schedule: Already-loaded schedule (takes precedence over schedule_path)
 
     Returns:
         Tuple of (passed, reporter)
@@ -716,9 +718,9 @@ def check_pyproject(
     reporter = Reporter(title="PHEP 3 Compliance Check")
 
     # Load or create schedule
-    if schedule_path and Path(schedule_path).exists():
+    if schedule is None and schedule_path and Path(schedule_path).exists():
         schedule = Schedule.from_file(schedule_path)
-    else:
+    if schedule is None:
         # Create minimal schedule from built-in Python dates
         from pyhc_actions.phep3.schedule import create_python_schedule
 

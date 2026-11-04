@@ -6,7 +6,43 @@ import argparse
 import sys
 from pathlib import Path
 
+import requests
+
 from pyhc_actions.phep3.checker import check_pyproject
+from pyhc_actions.phep3.schedule import (
+    Schedule,
+    fetch_latest_schedule,
+    load_bundled_schedule,
+)
+
+
+def _load_default_schedule() -> Schedule | None:
+    """Load the schedule to use when no --schedule or local schedule.json is given.
+
+    Mirrors the GitHub Action: download the schedule.json published with the
+    latest pyhc-actions release, falling back to the copy that ships with
+    pyhc-actions when the download fails (e.g. offline).
+
+    Returns:
+        Schedule, or None if neither source is available
+    """
+    try:
+        schedule = fetch_latest_schedule()
+    except (requests.RequestException, ValueError, KeyError, TypeError) as e:
+        reason = type(e).__name__
+        schedule = load_bundled_schedule()
+        if schedule is None:
+            print(f"Note: Could not download schedule.json ({reason}).")
+        else:
+            print(
+                f"Note: Could not download the latest schedule.json ({reason}); "
+                f"using the copy bundled with pyhc-actions "
+                f"(generated {schedule.generated_at:%Y-%m-%d})."
+            )
+        return schedule
+
+    print("Note: Using schedule.json from the latest pyhc-actions release.")
+    return schedule
 
 
 def main(args: list[str] | None = None) -> int:
@@ -25,6 +61,7 @@ def main(args: list[str] | None = None) -> int:
 Examples:
   %(prog)s                          # Check ./pyproject.toml
   %(prog)s path/to/pyproject.toml   # Check specific file
+  %(prog)s path/to/project          # Check a project directory
   %(prog)s --fail-on-warning        # Treat warnings as errors
   %(prog)s --no-adoption-check      # Skip 6-month adoption check
         """,
@@ -34,14 +71,18 @@ Examples:
         "project_file",
         nargs="?",
         default="pyproject.toml",
-        help="Path to pyproject.toml file (default: pyproject.toml)",
+        help="Path to pyproject.toml file or project directory (default: pyproject.toml)",
     )
 
     parser.add_argument(
         "--schedule",
         "-s",
         default=None,
-        help="Path to schedule.json file with version release dates",
+        help=(
+            "Path to schedule.json file with version release dates "
+            "(default: ./schedule.json or one next to the project if present, "
+            "else the latest pyhc-actions release's copy)"
+        ),
     )
 
     parser.add_argument(
@@ -90,41 +131,57 @@ Examples:
         update_schedule_file(parsed_args.schedule_output)
         return 0
 
-    # Check that project file exists
+    # Check that project file exists (a directory means its pyproject.toml)
     project_path = Path(parsed_args.project_file)
+    if project_path.is_dir():
+        project_dir = project_path
+        project_path = project_dir / "pyproject.toml"
+    elif project_path.name == "pyproject.toml":
+        project_dir = project_path.parent
+    else:
+        project_dir = None
+
     if not project_path.exists():
         # If pyproject.toml doesn't exist, try fallback to setup.py/setup.cfg
-        project_dir = project_path.parent if project_path.name == "pyproject.toml" else Path(".")
-        setup_py = project_dir / "setup.py"
-        setup_cfg = project_dir / "setup.cfg"
+        has_setup_files = project_dir is not None and (
+            (project_dir / "setup.py").exists() or (project_dir / "setup.cfg").exists()
+        )
 
-        if not parsed_args.no_uv_fallback and (setup_py.exists() or setup_cfg.exists()):
+        if has_setup_files and not parsed_args.no_uv_fallback:
             # uv fallback enabled and legacy packaging files (setup.py/setup.cfg) exist
             # Pass project directory to checker instead of pyproject.toml path
             project_path = project_dir
+        elif has_setup_files:
+            print(f"Error: File not found: {project_path}", file=sys.stderr)
+            print("Hint: Enable uv fallback to support setup.py/setup.cfg", file=sys.stderr)
+            return 1
+        elif project_dir is not None and project_dir.is_dir():
+            print(
+                f"Error: No packaging metadata found in {project_dir.resolve()}",
+                file=sys.stderr,
+            )
+            print("Hint: Expected pyproject.toml, setup.py, or setup.cfg", file=sys.stderr)
+            return 1
         else:
-            # No pyproject.toml and no fallback available
-            if parsed_args.no_uv_fallback:
-                print(f"Error: File not found: {project_path}", file=sys.stderr)
-                print(f"Hint: Enable uv fallback to support setup.py/setup.cfg", file=sys.stderr)
-            else:
-                print(f"Error: File not found: {project_path}", file=sys.stderr)
-                print(f"Hint: No setup.py or setup.cfg found for fallback", file=sys.stderr)
+            print(f"Error: File not found: {project_path}", file=sys.stderr)
             return 1
 
     # Find schedule file
     schedule_path = parsed_args.schedule
+    schedule = None
     if schedule_path is None:
-        # Look for schedule.json in common locations
+        # Look for a local schedule.json (e.g. from --generate-schedule) first
+        project_dir = project_path if project_path.is_dir() else project_path.parent
         candidates = [
             Path("schedule.json"),
-            project_path.parent / "schedule.json",
-            Path(__file__).parent.parent.parent.parent / "schedule.json",
+            project_dir / "schedule.json",
         ]
         for candidate in candidates:
             if candidate.exists():
                 schedule_path = candidate
                 break
+        else:
+            schedule = _load_default_schedule()
 
     # Parse ignore-errors-for into a set of normalized package names
     ignore_errors_for: set[str] = set()
@@ -143,6 +200,7 @@ Examples:
         fail_on_warning=parsed_args.fail_on_warning,
         use_uv_fallback=not parsed_args.no_uv_fallback,
         ignore_errors_for=ignore_errors_for,
+        schedule=schedule,
     )
 
     # Output results
